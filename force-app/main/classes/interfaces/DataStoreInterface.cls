@@ -1,0 +1,7 @@
+public interface DataStoreInterface {
+    DataModel.Flag getFlag(String key);
+
+    DataModel.Segment getSegment(String key);
+
+    void upsertVersionedData(VersionedData value);
+}
