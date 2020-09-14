@@ -2,7 +2,11 @@ public class LDValueNumber extends LDValue {
     private final Double value;
 
     public static LDValueNumber fromDouble(Double value) {
-        return new LDValueNumber(value);
+        if (value == null) {
+            return null;
+        } else {
+            return new LDValueNumber(value);
+        }
     }
 
     private LDValueNumber(Double value) {

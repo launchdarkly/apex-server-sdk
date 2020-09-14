@@ -1,8 +1,7 @@
 public class LDClient {
-    private final LDConfig            config;
-    private final DataStoreInterface  store;
-    private final DataSourceInterface source;
-    private final Evaluator           evaluator;
+    private final LDConfig           config;
+    private final DataStoreInterface store;
+    private final Evaluator          evaluator;
 
     public class EvaluationDetail {
         private Integer          variationIndex;
@@ -25,10 +24,7 @@ public class LDClient {
     public LDClient(LDConfig config) {
         this.config    = config;
         this.store     = new DataStore();
-        this.source    = new DataSource(this.config, this.store);
         this.evaluator = new Evaluator(this.store);
-
-        this.source.poll();
     }
 
     public Boolean boolVariation(LDUser user, String key, Boolean fallback) {

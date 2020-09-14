@@ -2,12 +2,15 @@ public class LDValueArray extends LDValue {
     private final List<LDValue> value;
 
     public static LDValueArray fromList(List<LDValue> value) {
-        return new LDValueArray(value);
+        if (value == null) {
+            return null;
+        } else {
+            return new LDValueArray(value);
+        }
     }
 
     private LDValueArray(List<LDValue> value) {
-        // todo copy list to make immutable
-        this.value = value;
+        this.value = new List<LDValue>(value);
     }
 
     public override LDValueType getType() {

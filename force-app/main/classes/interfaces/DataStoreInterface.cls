@@ -3,5 +3,5 @@ public interface DataStoreInterface {
 
     DataModel.Segment getSegment(String key);
 
-    void upsertVersionedData(VersionedData value);
+    void insertVersionedData(VersionedData value);
 }

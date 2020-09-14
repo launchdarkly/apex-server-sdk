@@ -5,7 +5,11 @@ public class LDValueBool extends LDValue {
     private static final LDValueBool CFALSE = new LDValueBool(false);
 
     public static LDValueBool fromBoolean(Boolean value) {
-        return value ? CTRUE : CFALSE;
+        if (value == null) {
+            return null;
+        } else {
+            return value ? CTRUE : CFALSE;
+        }
     }
 
     private LDValueBool(Boolean value) {

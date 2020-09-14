@@ -47,7 +47,25 @@ public class DataStore implements DataStoreInterface {
         }
     }
 
-    public void upsertVersionedData(VersionedData value) {
+    public void putAll(Map<String, Object> kinds) {
+        // delete existing store values
+        List<VersionedData__c> existingFeatures = [select Key__c from VersionedData__C];
+        delete existingFeatures;
+        // iterate over kinds of features such as flags / segments
+        for (String kind : kinds.keySet()) {
+            Map<String, Object> features = (Map<String, Object>)kinds.get(kind);
+
+            for (String key : features.keySet()) {
+                Map<String, Object> feature = (Map<String, Object>)features.get(key);
+
+                VersionedData versioned = new VersionedData(kind, feature);
+
+                this.insertVersionedData(versioned);
+            }
+        }
+    }
+
+    public void insertVersionedData(VersionedData value) {
         insert value.getSObject();
     }
 }
