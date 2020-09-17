@@ -103,18 +103,26 @@ public class LDClient {
     }
 
     private Evaluator.EvalResult evaluateInternal(String featureKey, LDUser user, LDValue defaultValue, Boolean checkType) {
-        DataModel.Flag flag = this.store.getFlag(featureKey);
+        try {
+            DataModel.Flag flag = this.store.getFlag(featureKey);
 
-        if (flag == null) {
-            return new Evaluator.EvalResult(defaultValue, -1, EvaluationReason.error(EvaluationReason.ErrorKind.FLAG_NOT_FOUND));
+            if (flag == null) {
+                return new Evaluator.EvalResult(defaultValue, -1, EvaluationReason.error(EvaluationReason.ErrorKind.FLAG_NOT_FOUND));
+            }
+
+            if (user == NULL) {
+                return new Evaluator.EvalResult(defaultValue, -1, EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED));
+            }
+
+            Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user);
+
+            if (evalResult.getValue() == null) {
+                return new Evaluator.EvalResult(defaultValue, -1, evalResult.getReason());
+            } else {
+                return evalResult;
+            }
+        } catch (Exception err) {
+            return new Evaluator.EvalResult(defaultValue, -1, EvaluationReason.error(EvaluationReason.ErrorKind.EXCEPTION_THROWN));
         }
-
-        if (user == NULL) {
-            return new Evaluator.EvalResult(defaultValue, -1, EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED));
-        }
-
-        Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user);
-
-        return evalResult;
     }
 }

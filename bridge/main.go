@@ -2,36 +2,91 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
 const (
 	LD_BASE_URI   = "https://app.launchdarkly.com"
+	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
 	POLL_INTERVAL = 30 * time.Second
 )
 
+type AuthBody struct {
+	AccessToken string `json:"access_token"`
+}
+
+func getEnvRequired(env string) string {
+	if tmp := os.Getenv(env); tmp != "" {
+		return tmp;
+	} else {
+		log.Panic(env+" required")
+		// impossible but compiler warns
+		return "";
+	}
+}
+
+func getAuthorization() string {
+	OAUTH_ID := getEnvRequired("OAUTH_ID")
+	OAUTH_SECRET := getEnvRequired("OAUTH_SECRET")
+	OAUTH_REFRESH_TOKEN := getEnvRequired("OAUTH_REFRESH_TOKEN")
+
+	client := &http.Client{}
+
+	query := url.Values{}
+	query.Add("grant_type", "refresh_token")
+	query.Add("client_id", OAUTH_ID)
+	query.Add("client_secret", OAUTH_SECRET)
+	query.Add("refresh_token", OAUTH_REFRESH_TOKEN)
+
+	authRequest, err := http.NewRequest("POST", OAUTH_URI, strings.NewReader(query.Encode()))
+
+	if err != nil {
+		log.Panic("failed constructing auth request ", err)
+	}
+
+	authRequest.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	authResponse, err := client.Do(authRequest)
+
+	if err != nil {
+		log.Panic("failed getting oauth token")
+	}
+
+	if authResponse.StatusCode != 200 {
+		log.Panic("failed getting oauth token expected 200 got ", authResponse.StatusCode)
+	}
+
+	authBytes, err := ioutil.ReadAll(authResponse.Body)
+
+	if err != nil {
+		log.Panic("failed to read auth response body")
+	}
+
+	// authString := string(authBytes)
+	// log.Print(authString)
+
+	var parsed AuthBody;
+	json.Unmarshal(authBytes, &parsed)
+
+	if parsed.AccessToken == "" {
+		log.Panic("expected access token in body")
+	}
+
+	return parsed.AccessToken
+}
+
 func main() {
-	LD_SDK_KEY := os.Getenv("LD_SDK_KEY")
+	LD_SDK_KEY := getEnvRequired("LD_SDK_KEY")
+	SALESFORCE_URL := getEnvRequired("SALESFORCE_URL")
 
-	if LD_SDK_KEY == "" {
-		log.Panic("LD_SDK_KEY required")
-	}
-
-	SALESFORCE_KEY := os.Getenv("SALESFORCE_KEY")
-
-	if SALESFORCE_KEY == "" {
-		log.Panic("SALESFORCE_KEY required")
-	}
-
-	SALESFORCE_URL := os.Getenv("SALESFORCE_URL")
-
-	if SALESFORCE_URL == "" {
-		log.Panic("SALESFORCE_URL required")
-	}
+	tokenSalesForce := getAuthorization()
 
 	client := &http.Client{}
 
@@ -97,7 +152,7 @@ func main() {
 			}
 
 			pushRequest.Header.Set("Content-Type", "application/json")
-			pushRequest.Header.Set("Authorization", "Bearer " + SALESFORCE_KEY)
+			pushRequest.Header.Set("Authorization", "Bearer " + tokenSalesForce)
 
 			log.Print("pushing flags to: " + pushURI)
 

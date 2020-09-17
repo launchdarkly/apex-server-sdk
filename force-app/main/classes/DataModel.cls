@@ -57,8 +57,10 @@ public class DataModel {
     }
 
     public class VariationOrRollout {
-        private final Integer           variation;
-        private final DataModel.Rollout rollout;
+        public Integer           variation;
+        public DataModel.Rollout rollout;
+
+        public VariationOrRollout() {}
 
         public VariationOrRollout(Object raw) {
             System.assertNotEquals(raw, null);
@@ -85,10 +87,17 @@ public class DataModel {
     }
 
     public class Clause {
-        private final String        attribute;
-        private final String        operator;
-        private final Boolean       negate;
-        private final List<LDValue> values;
+        public String        attribute;
+        public String        operator;
+        public Boolean       negate;
+        public List<LDValue> values;
+
+        public Clause(String attribute, String operator) {
+            this.attribute = attribute;
+            this.operator  = operator;
+            this.negate    = false;
+            this.values    = new List<LDValue>();
+        }
 
         public Clause(Object raw) {
             System.assertNotEquals(raw, null);
@@ -132,10 +141,17 @@ public class DataModel {
     }
 
     public class Rule {
-        private final String                       ruleId;
-        private final Boolean                      trackEvents;
-        private final List<Clause>                 clauses;
-        private final DataModel.VariationOrRollout vor;
+        public String                       ruleId;
+        public Boolean                      trackEvents;
+        public List<Clause>                 clauses;
+        public DataModel.VariationOrRollout vor;
+
+        public Rule(String ruleId) {
+            this.ruleId      = ruleId;
+            this.trackEvents = false;
+            this.clauses     = new List<Clause>();
+            this.vor         = new VariationOrRollout();
+        }
 
         public Rule(Object raw) {
             System.assertNotEquals(raw, null);
@@ -180,8 +196,13 @@ public class DataModel {
     }
 
     public class Target {
-        private final Integer      variation;
-        private final List<String> values;
+        public Integer      variation;
+        public List<String> values;
+
+        public Target() {
+            this.variation = 0;
+            this.values    = new List<String>();
+        }
 
         public Target(Object raw) {
             System.assertNotEquals(raw, null);
@@ -207,6 +228,11 @@ public class DataModel {
     public class Prerequisite {
         private final Integer variation;
         private final String  key;
+
+        public Prerequisite(Integer variation, String key) {
+            this.variation = variation;
+            this.key       = key;
+        }
 
         public Prerequisite(Object raw) {
             System.assertNotEquals(raw, null);
@@ -277,12 +303,21 @@ public class DataModel {
     }
 
     public class Segment {
-        private final String                      key;
-        private final Set<String>                 included;
-        private final Set<String>                 excluded;
-        private final String                      salt;
-        private final List<DataModel.SegmentRule> rules;
-        private final Integer                     version;
+        public String                      key;
+        public Set<String>                 included;
+        public Set<String>                 excluded;
+        public String                      salt;
+        public List<DataModel.SegmentRule> rules;
+        public Integer                     version;
+
+        public Segment(String key) {
+            this.key      = key;
+            this.included = new Set<String>();
+            this.excluded = new Set<String>();
+            this.salt     = 'abcdefg';
+            this.rules    = new List<DataModel.SegmentRule>();
+            this.version  = 0;
+        }
 
         public Segment(Object raw) {
             System.assertNotEquals(raw, null);
@@ -353,16 +388,26 @@ public class DataModel {
     }
 
     public class Flag {
-        private final Integer                      version;
-        private final String                       key;
-        private final Boolean                      fieldOn;
-        private final List<LDValue>                variations;
-        private final Integer                      offVariation; // may be null
-        private final DataModel.VariationOrRollout fallthrough;
-        private final List<DataModel.Target>       targets;
-        private final List<DataModel.Prerequisite> prerequisites;
-        private final List<DataModel.Rule>         rules;
-        private final String                       salt;
+        public Integer                      version;
+        public String                       key;
+        public Boolean                      fieldOn;
+        public List<LDValue>                variations;
+        public Integer                      offVariation; // may be null
+        public DataModel.VariationOrRollout fallthrough;
+        public List<DataModel.Target>       targets;
+        public List<DataModel.Prerequisite> prerequisites;
+        public List<DataModel.Rule>         rules;
+        public String                       salt;
+
+        public Flag() {
+            this.fieldOn       = false;
+            this.offVariation  = 0;
+            this.variations    = new List<LDValue>();
+            this.prerequisites = new List<DataModel.Prerequisite>();
+            this.targets       = new List<DataModel.Target>();
+            this.rules         = new List<DataModel.Rule>();
+            this.fallthrough   = new DataModel.VariationOrRollout();
+        }
 
         public Flag(String raw) {
             Map<String, Object> obj = (Map<String, Object>)

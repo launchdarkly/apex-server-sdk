@@ -9,6 +9,14 @@ public class LDValueNumber extends LDValue {
         }
     }
 
+    public static LDValueNumber fromInteger(Integer value) {
+        if (value == null) {
+            return null;
+        } else {
+            return new LDValueNumber((Double)value);
+        }
+    }
+
     private LDValueNumber(Double value) {
         this.value = value;
     }

@@ -13,7 +13,8 @@ public class EvaluationReason {
         FLAG_NOT_FOUND,
         MALFORMED_FLAG,
         USER_NOT_SPECIFIED,
-        WRONG_TYPE
+        WRONG_TYPE,
+        EXCEPTION_THROWN
     }
 
     private final Kind      kind;
@@ -30,6 +31,7 @@ public class EvaluationReason {
     private static final EvaluationReason ERROR_MALFORMED_FLAG     = new EvaluationReason(ErrorKind.MALFORMED_FLAG);
     private static final EvaluationReason ERROR_USER_NOT_SPECIFIED = new EvaluationReason(ErrorKind.USER_NOT_SPECIFIED);
     private static final EvaluationReason ERROR_WRONG_TYPE         = new EvaluationReason(ErrorKind.WRONG_TYPE);
+    private static final EvaluationReason ERROR_EXCEPTION_THROWN   = new EvaluationReason(ErrorKind.EXCEPTION_THROWN);
 
     private EvaluationReason(Kind kind, Integer ruleIndex, String ruleId,
         String prerequisiteKey, ErrorKind errorKind)
@@ -69,6 +71,10 @@ public class EvaluationReason {
         return TARGET_MATCH_INSTANCE;
     }
 
+    public static EvaluationReason exception() {
+        return ERROR_EXCEPTION_THROWN;
+    }
+
     public static EvaluationReason prerequisiteFailed(String prerequisiteKey) {
         return new EvaluationReason(Kind.PREREQUISITE_FAILED, -1, null, prerequisiteKey, null);
     }
@@ -97,5 +103,9 @@ public class EvaluationReason {
         }
 
         return new EvaluationReason(errorKind);
+    }
+
+    public Kind getKind() {
+        return this.kind;
     }
 }

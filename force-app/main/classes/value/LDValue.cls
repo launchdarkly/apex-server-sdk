@@ -5,6 +5,10 @@ public abstract class LDValue {
         return LDValueBool.fromBoolean(value);
     }
 
+    public static LDValue of(Integer value) {
+        return LDValueNumber.fromInteger(value);
+    }
+
     public static LDValue of(Double value) {
         return LDValueNumber.fromDouble(value);
     }

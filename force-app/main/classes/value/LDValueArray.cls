@@ -22,6 +22,28 @@ public class LDValueArray extends LDValue {
     }
 
     public override LDValue get(Integer index) {
-        return this.value.get(index);
+        if (this.value.size() > index) {
+            return this.value.get(index);
+        } else {
+            return null;
+        }
+    }
+
+    public class Builder {
+        private List<LDValue> value;
+
+        public Builder() {
+            this.value = new List<LDValue>();
+        }
+
+        public Builder add(LDValue value) {
+            this.value.add(value);
+
+            return this;
+        }
+
+        public LDValueArray build() {
+            return new LDValueArray(this.value);
+        }
     }
 }

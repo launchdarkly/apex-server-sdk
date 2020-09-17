@@ -21,7 +21,11 @@ public class DataStore implements DataStoreInterface {
         if (versioned.isEmpty()) {
             return null;
         } else {
-            return new DataModel.Flag(versioned.get(0).Raw__c);
+            try {
+                return new DataModel.Flag(versioned.get(0).Raw__c);
+            } catch (Exception err) {
+                return null;
+            }
         }
     }
 
@@ -43,7 +47,11 @@ public class DataStore implements DataStoreInterface {
         if (versioned.isEmpty()) {
             return null;
         } else {
-            return new DataModel.Segment(versioned.get(0).Raw__c);
+            try {
+                return new DataModel.Segment(versioned.get(0).Raw__c);
+            } catch (Exception err) {
+                return null;
+            }
         }
     }
 
