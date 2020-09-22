@@ -49,6 +49,10 @@ public abstract class LDValue {
         return 0;
     }
 
+    public virtual Object toGeneric() {
+        return null;
+    }
+
     public virtual LDValue get(Integer index) {
         return null;
     }

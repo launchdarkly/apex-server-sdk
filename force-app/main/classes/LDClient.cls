@@ -2,6 +2,7 @@ public class LDClient {
     private final LDConfig           config;
     private final DataStoreInterface store;
     private final Evaluator          evaluator;
+    private final EventSinkInterface eventSink;
 
     public class EvaluationDetail {
         private Integer          variationIndex;
@@ -25,6 +26,7 @@ public class LDClient {
         this.config    = config;
         this.store     = new DataStore();
         this.evaluator = new Evaluator(this.store);
+        this.eventSink = new EventSink();
     }
 
     public Boolean boolVariation(LDUser user, String key, Boolean fallback) {
@@ -100,6 +102,40 @@ public class LDClient {
         details.reason         = result.getReason();
 
         return result.getValue();
+    }
+
+    public Map<String, LDValue> allFlags(LDUser user) {
+        if (user == null || user.getKey() == null) {
+            return null;
+        }
+
+        Map<String, LDValue> result = new Map<String, LDValue>();
+
+        Map<String, DataModel.Flag> flags = this.store.allFlags();
+
+        for (String flagKey : flags.keySet()) {
+            DataModel.Flag flag = flags.get(flagKey);
+
+            try {
+                Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user);
+
+                if (evalResult.getValue() != null) {
+                    result.put(flagKey, evalResult.getValue());
+                }
+            } catch (Exception err) {
+                // required by compiler
+            }
+        }
+
+        return result;
+    }
+
+    public void identify(LDUser user) {
+        if (user == null || user.getKey() == null) {
+            return;
+        }
+
+        this.eventSink.sinkIdentify(new Event.Identify(user));
     }
 
     private Evaluator.EvalResult evaluateInternal(String featureKey, LDUser user, LDValue defaultValue, Boolean checkType) {

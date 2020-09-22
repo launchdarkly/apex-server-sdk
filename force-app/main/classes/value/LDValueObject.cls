@@ -25,6 +25,16 @@ public class LDValueObject extends LDValue {
         return this.value.get(index);
     }
 
+    public override Object toGeneric() {
+        Map<String, Object> result = new Map<String, Object>();
+
+        for (String key : this.value.keySet()) {
+            result.put(key, this.value.get(key).toGeneric());
+        }
+
+        return result;
+    }
+
     public class Builder {
         private Map<String, LDValue> value;
 

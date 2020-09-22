@@ -29,6 +29,16 @@ public class LDValueArray extends LDValue {
         }
     }
 
+    public override Object toGeneric() {
+        List<Object> result = new List<Object>();
+
+        for (LDValue value : this.value) {
+            result.add(value.toGeneric());
+        }
+
+        return result;
+    }
+
     public class Builder {
         private List<LDValue> value;
 

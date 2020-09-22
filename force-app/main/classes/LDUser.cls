@@ -116,6 +116,63 @@ public class LDUser {
         }
     }
 
+    private void addField(
+        Map<String, Object> result,
+        List<String>        redacted,
+        String              key,
+        Object              value
+    ) {
+        if (this.privateAttributeNames != null && this.privateAttributeNames.contains(key)) {
+            if (value != null) {
+                redacted.add(key);
+            }
+        } else {
+            if (value != null) {
+                result.put(key, value);
+            }
+        }
+    }
+
+    public Object toGeneric() {
+        List<String> redacted = new List<String>();
+
+        Map<String, Object> result = new Map<String, Object>();
+
+        result.put('key', this.key);
+
+        if (this.anonymous == true) {
+            result.put('anonymous', this.anonymous);
+        }
+
+        this.addField(result, redacted, 'ip',        this.ip);
+        this.addField(result, redacted, 'firstName', this.firstName);
+        this.addField(result, redacted, 'lastName',  this.lastName);
+        this.addField(result, redacted, 'name',      this.name);
+        this.addField(result, redacted, 'avatar',    this.avatar);
+        this.addField(result, redacted, 'country',   this.country);
+        this.addField(result, redacted, 'secondary', this.secondary);
+
+        if (this.custom != null) {
+            Map<String, Object> filtered = new Map<String, Object>();
+
+            Map<String, Object> customMap = (Map<String, Object>)this.custom.toGeneric();
+
+            for (String key : customMap.keySet()) {
+                this.addField(filtered, redacted, key, customMap.get(key));
+            }
+
+            if (filtered.size() != 0) {
+                result.put('custom', (Object)filtered);
+            }
+        }
+
+        if (redacted.size() != 0) {
+            result.put('privateAttrs', (Object)redacted);
+        }
+
+        return result;
+    }
+
     public class Builder {
         private String        key;
         private Boolean       anonymous;

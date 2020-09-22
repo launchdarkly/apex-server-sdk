@@ -23,4 +23,8 @@ public class LDValueBool extends LDValue {
     public override Boolean booleanValue() {
         return this.value;
     }
+
+    public override Object toGeneric() {
+        return (Object)this.value;
+    }
 }

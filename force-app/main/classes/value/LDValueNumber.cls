@@ -36,4 +36,8 @@ public class LDValueNumber extends LDValue {
     public override Boolean isInt(){
         return this.value == (Double)((Integer)this.value);
     }
+
+    public override Object toGeneric() {
+        return (Object)this.value;
+    }
 }

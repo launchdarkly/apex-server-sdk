@@ -188,7 +188,9 @@ public class Evaluator {
             List<LDValue> values = clause.getValues();
 
             for (LDValue value : values) {
-                // check if operator passes
+                if (EvaluatorOperators.apply(op, userValue, value)) {
+                    return true;
+                }
             }
         }
 

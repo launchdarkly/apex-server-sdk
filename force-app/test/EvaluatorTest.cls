@@ -16,6 +16,10 @@ private class EvaluatorTest {
         public DataModel.Segment getSegment(String key) {
             return this.segments.get(key);
         }
+
+        public Map<String, DataModel.Flag> allFlags() {
+            return flags;
+        }
     }
 
     @isTest static void offFlagReturnsOffVariation() {

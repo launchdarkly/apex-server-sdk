@@ -64,4 +64,67 @@ private class LDUserTest {
         System.assertEquals(user.getAttribute('secondary'), null);
         System.assertEquals(user.getAttribute('unknown'), null);
     }
+
+    @isTest static void serializeBasic() {
+        LDUser user = new LDUser.Builder('hello')
+            .setName('alice')
+            .build();
+
+        String result = JSON.serialize(user.toGeneric());
+
+        System.assertEquals(result, '{"name":"alice","key":"hello"}');
+    }
+
+    @isTest static void serializeAllFields() {
+        LDValueObject custom = new LDValueObject.Builder()
+            .set('a', LDValue.of('b'))
+            .build();
+
+        LDUser user = new LDUser.Builder('1')
+            .setAnonymous(true)
+            .setIP('2')
+            .setFirstName('3')
+            .setLastName('4')
+            .setName('5')
+            .setAvatar('6')
+            .setCountry('7')
+            .setSecondary('8')
+            .setCustom(custom)
+            .build();
+
+        String result = JSON.serialize(user.toGeneric());
+
+        String expected = '{"custom":{"a":"b"},"secondary":"8","country":"7",'
+            + '"avatar":"6","name":"5","lastName":"4","firstName":"3","ip":"2",'
+            + '"anonymous":true,"key":"1"}';
+
+        System.assertEquals(result, expected);
+    }
+
+
+    @isTest static void serializeRedacted() {
+        Set<String> privateAttributeNames = new Set<String>();
+        privateAttributeNames.add('lastName');
+        privateAttributeNames.add('private');
+        privateAttributeNames.add('does_not_exist');
+
+        LDUser user = new LDUser.Builder('hello')
+            .setFirstName('alice')
+            .setLastName('smith')
+            .setCustom(
+                new LDValueObject.Builder()
+                    .set('public', LDValue.of('a'))
+                    .set('private', LDValue.of('b'))
+                    .build()
+            )
+            .setPrivateAttributeNames(privateAttributeNames)
+            .build();
+
+        String result = JSON.serialize(user.toGeneric());
+
+        String expected = '{"privateAttrs":["lastName","private"],'
+            + '"custom":{"public":"a"},"firstName":"alice","key":"hello"}';
+
+        System.assertEquals(result, expected);
+    }
 }

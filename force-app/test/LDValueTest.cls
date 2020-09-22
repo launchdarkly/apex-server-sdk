@@ -5,6 +5,7 @@ private class LDValueTest {
         LDValue value = LDValue.of(x);
         System.assertEquals(value.getType(), LDValueType.CBOOLEAN);
         System.assertEquals(value.booleanValue(), x);
+        System.assertEquals(value.toGeneric(), (Object)x);
     }
 
     @isTest static void basicDouble() {
@@ -12,6 +13,7 @@ private class LDValueTest {
         LDValue value = LDValue.of(x);
         System.assertEquals(value.getType(), LDValueType.CNUMBER);
         System.assertEquals(value.doubleValue(), x);
+        System.assertEquals(value.toGeneric(), (Object)x);
     }
 
     @isTest static void basicInteger() {
@@ -19,6 +21,7 @@ private class LDValueTest {
         LDValue value = LDValue.of(x);
         System.assertEquals(value.getType(), LDValueType.CNUMBER);
         System.assertEquals(value.intValue(), x);
+        System.assertEquals(value.toGeneric(), (Object)x);
     }
 
     @isTest static void basicString() {
@@ -26,6 +29,7 @@ private class LDValueTest {
         LDValue value = LDValue.of(x);
         System.assertEquals(value.getType(), LDValueType.CSTRING);
         System.assertEquals(value.stringValue(), x);
+        System.assertEquals(value.toGeneric(), (Object)x);
     }
 
     @isTest static void basicObject() {
@@ -36,6 +40,9 @@ private class LDValueTest {
         LDValue child = value.get('a');
         System.assertEquals(child.getType(), LDValueType.CBOOLEAN);
         System.assertEquals(child.booleanValue(), true);
+        Map<String, Object> expectedGeneric = new Map<String, Object>();
+        expectedGeneric.put('a', (Object)true);
+        System.assertEquals(value.toGeneric(), expectedGeneric);
     }
 
     @isTest static void basicArray() {
@@ -46,5 +53,8 @@ private class LDValueTest {
         LDValue child = value.get(0);
         System.assertEquals(child.getType(), LDValueType.CBOOLEAN);
         System.assertEquals(child.booleanValue(), true);
+        List<Object> expectedGeneric = new List<Object>();
+        expectedGeneric.add((Object)true);
+        System.assertEquals(value.toGeneric(), expectedGeneric);
     }
 }

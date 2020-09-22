@@ -55,6 +55,32 @@ public class DataStore implements DataStoreInterface {
         }
     }
 
+    public Map<String, DataModel.Flag> allFlags() {
+        Map<String, DataModel.Flag> result = new Map<String, DataModel.Flag>();
+
+        List<VersionedData__c> flags = [
+            SELECT
+                Version__c,
+                Raw__c,
+                Key__c,
+                Kind__c
+            FROM
+                VersionedData__c
+            WHERE
+                Kind__c = 'flags'
+        ];
+
+        for (VersionedData__C flag : flags) {
+            try {
+                result.put(flag.Key__c, new DataModel.Flag(flag.Raw__c));
+            } catch (Exception err) {
+                // required by compiler
+            }
+        }
+
+        return result;
+    }
+
     public void putAll(Map<String, Object> kinds) {
         // delete existing store values
         List<VersionedData__c> existingFeatures = [select Key__c from VersionedData__C];

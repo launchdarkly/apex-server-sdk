@@ -20,4 +20,8 @@ public class LDValueString extends LDValue {
     public override String stringValue() {
         return this.value;
     }
+
+    public override Object toGeneric() {
+        return (Object)this.value;
+    }
 }
