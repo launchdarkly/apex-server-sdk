@@ -58,4 +58,38 @@ private class LDClientTest {
         System.assertEquals(events.get(0).Kind__c, 'identify');
         System.assertEquals(events.get(0).Raw__c, expected);
     }
+
+    @isTest static void trackMinimal() {
+        LDConfig config = new LDConfig.Builder('sdk-xyz').build();
+        LDUser   user   = new LDUser.Builder('user-key').build();
+        LDClient client = new LDClient(config);
+
+        client.track(user, 'abc', null, null);
+
+        List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
+
+        String expected = '{"user":{"key":"user-key"},"key":"abc","kind":"custom"}';
+
+        System.assertEquals(events.size(), 1);
+        System.assertEquals(events.get(0).Kind__c, 'custom');
+        System.assertEquals(events.get(0).Raw__c, expected);
+    }
+
+    @isTest static void trackFull() {
+        LDConfig config = new LDConfig.Builder('sdk-xyz').build();
+        LDUser   user   = new LDUser.Builder('user-key').build();
+        LDClient client = new LDClient(config);
+        LDValue  value  = new LDValueObject.Builder().set('a', LDValue.of(true)).build();
+
+        client.track(user, '123', (Double)52.1, value);
+
+        List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
+
+        String expected = '{"data":{"a":true},"metricValue":52.1,'
+            + '"user":{"key":"user-key"},"key":"123","kind":"custom"}';
+
+        System.assertEquals(events.size(), 1);
+        System.assertEquals(events.get(0).Kind__c, 'custom');
+        System.assertEquals(events.get(0).Raw__c, expected);
+    }
 }

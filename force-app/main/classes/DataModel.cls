@@ -398,30 +398,47 @@ public class DataModel {
         public List<DataModel.Prerequisite> prerequisites;
         public List<DataModel.Rule>         rules;
         public String                       salt;
+        public Double                       debugEventsUntilDate;
+        public Boolean                      trackEvents;
+        public Boolean                      trackEventsFallthrough;
 
         public Flag() {
-            this.fieldOn       = false;
-            this.offVariation  = 0;
-            this.variations    = new List<LDValue>();
-            this.prerequisites = new List<DataModel.Prerequisite>();
-            this.targets       = new List<DataModel.Target>();
-            this.rules         = new List<DataModel.Rule>();
-            this.fallthrough   = new DataModel.VariationOrRollout();
+            this.fieldOn                = false;
+            this.offVariation           = 0;
+            this.variations             = new List<LDValue>();
+            this.prerequisites          = new List<DataModel.Prerequisite>();
+            this.targets                = new List<DataModel.Target>();
+            this.rules                  = new List<DataModel.Rule>();
+            this.fallthrough            = new DataModel.VariationOrRollout();
+            this.trackEvents            = false;
+            this.trackEventsFallthrough = false;
+            this.version                = 0;
         }
 
         public Flag(String raw) {
             Map<String, Object> obj = (Map<String, Object>)
                 JSON.deserializeUntyped(raw);
 
-            this.version       = (Integer)obj.get('version');
-            this.key           = (String)obj.get('key');
-            this.fieldOn       = (Boolean)obj.get('on');
-            this.variations    = new List<LDValue>();
-            this.offVariation  = (Integer)obj.get('offVariation');
-            this.targets       = new List<DataModel.Target>();
-            this.prerequisites = new List<DataModel.Prerequisite>();
-            this.rules         = new List<DataModel.Rule>();
-            this.salt          = (String)obj.get('salt');
+            this.version                = (Integer)obj.get('version');
+            this.key                    = (String)obj.get('key');
+            this.fieldOn                = (Boolean)obj.get('on');
+            this.variations             = new List<LDValue>();
+            this.offVariation           = (Integer)obj.get('offVariation');
+            this.targets                = new List<DataModel.Target>();
+            this.prerequisites          = new List<DataModel.Prerequisite>();
+            this.rules                  = new List<DataModel.Rule>();
+            this.salt                   = (String)obj.get('salt');
+            this.debugEventsUntilDate   = (Double)obj.get('debugEventsUntilDate');
+            this.trackEvents            = (Boolean)obj.get('trackEvents');
+            this.trackEventsFallthrough = (Boolean)obj.get('trackEventsFallthrough');
+
+            if (this.trackEvents == null) {
+                this.trackEvents = false;
+            }
+
+            if (this.trackEventsFallthrough == null) {
+                this.trackEventsFallthrough = false;
+            }
 
             // variations
             List<Object> variations = (List<Object>)obj.get('variations');
@@ -508,6 +525,18 @@ public class DataModel {
 
         public String getSalt() {
             return this.salt;
+        }
+
+        public Double getDebugEventsUntilDate() {
+            return this.debugEventsUntilDate;
+        }
+
+        public Boolean getTrackEvents() {
+            return this.trackEvents;
+        }
+
+        public Boolean getTrackEventsFallthrough() {
+            return this.trackEventsFallthrough;
         }
     }
 }

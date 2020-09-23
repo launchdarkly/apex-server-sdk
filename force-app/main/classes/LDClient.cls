@@ -138,23 +138,88 @@ public class LDClient {
         this.eventSink.sinkIdentify(new Event.Identify(user));
     }
 
+    public void track(LDUser user, String key, Double optionalMetric, LDValue optionalValue) {
+        if (user == null || user.getKey() == null || key == null) {
+            return;
+        }
+
+        this.eventSink.sinkCustom(new Event.Custom(user, key, optionalMetric, optionalValue));
+    }
+
     private Evaluator.EvalResult evaluateInternal(String featureKey, LDUser user, LDValue defaultValue, Boolean checkType) {
         try {
+            if (user == NULL || user.getKey() == NULL) {
+                EvaluationReason reason = EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED);
+
+                Event.Feature event = new Event.Feature(
+                    featureKey, // key
+                    user, // user
+                    null, // version
+                    null, // variation
+                    defaultValue, // value
+                    defaultValue, // defaultValue
+                    reason, // reason
+                    null, // prereqOf
+                    false, // trackEvents
+                    null, // debugEventsUntilDate
+                    false // debug
+                );
+
+                this.eventSink.sinkFeature(event);
+
+                return new Evaluator.EvalResult(defaultValue, -1, reason);
+            }
+
             DataModel.Flag flag = this.store.getFlag(featureKey);
 
             if (flag == null) {
-                return new Evaluator.EvalResult(defaultValue, -1, EvaluationReason.error(EvaluationReason.ErrorKind.FLAG_NOT_FOUND));
+                EvaluationReason reason = EvaluationReason.error(EvaluationReason.ErrorKind.FLAG_NOT_FOUND);
+
+                Event.Feature event = new Event.Feature(
+                    featureKey, // key
+                    user, // user
+                    null, // version
+                    null, // variation
+                    defaultValue, // value
+                    defaultValue, // defaultValue
+                    reason, // reason
+                    null, // prereqOf
+                    false, // trackEvents
+                    null, // debugEventsUntilDate
+                    false // debug
+                );
+
+                this.eventSink.sinkFeature(event);
+
+                return new Evaluator.EvalResult(defaultValue, -1, reason);
             }
 
-            if (user == NULL) {
-                return new Evaluator.EvalResult(defaultValue, -1, EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED));
-            }
 
             Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user);
 
             if (evalResult.getValue() == null) {
                 return new Evaluator.EvalResult(defaultValue, -1, evalResult.getReason());
             } else {
+                Event.Feature event = new Event.Feature(
+                    featureKey, // key
+                    user, // user
+                    flag.getVersion(), // version
+                    evalResult.getVariationIndex(), // variation
+                    evalResult.getValue(), // value
+                    defaultValue, // defaultValue
+                    evalResult.getReason(), // reason
+                    null, // prereqOf
+                    flag.getTrackEvents(), // trackEvents
+                    flag.getDebugEventsUntilDate(), // debugEventsUntilDate
+                    false // debug
+                );
+
+                this.eventSink.sinkFeature(event);
+
+                for (Event.Feature prereqEvent : evalResult.getPrerequisiteEvents()) {
+                    this.eventSink.sinkFeature(prereqEvent);
+                }
+
                 return evalResult;
             }
         } catch (Exception err) {

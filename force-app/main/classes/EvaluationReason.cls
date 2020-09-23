@@ -108,4 +108,8 @@ public class EvaluationReason {
     public Kind getKind() {
         return this.kind;
     }
+
+    public Integer getRuleIndex() {
+        return this.ruleIndex;
+    }
 }

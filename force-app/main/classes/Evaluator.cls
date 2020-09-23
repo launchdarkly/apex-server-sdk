@@ -1,19 +1,22 @@
 public class Evaluator {
     public class EvalResult {
-        private final LDValue          value;
-        private final Integer          variationIndex;
-        private final EvaluationReason reason;
+        private final LDValue             value;
+        private final Integer             variationIndex;
+        private final EvaluationReason    reason;
+        private       List<Event.Feature> prerequisiteEvents;
 
         public EvalResult(LDValue value, Integer variationIndex, EvaluationReason reason) {
-            this.value          = value;
-            this.variationIndex = variationIndex;
-            this.reason         = reason;
+            this.value              = value;
+            this.variationIndex     = variationIndex;
+            this.reason             = reason;
+            this.prerequisiteEvents = new List<Event.Feature>();
         }
 
         public EvalResult(EvaluationReason.ErrorKind errorKind) {
-            this.value          = null;
-            this.variationIndex = null;
-            this.reason         = EvaluationReason.error(errorKind);
+            this.value              = null;
+            this.variationIndex     = null;
+            this.reason             = EvaluationReason.error(errorKind);
+            this.prerequisiteEvents = new List<Event.Feature>();
         }
 
         public LDValue getValue() {
@@ -27,6 +30,14 @@ public class Evaluator {
         public EvaluationReason getReason() {
             return this.reason;
         }
+
+        public List<Event.Feature> getPrerequisiteEvents() {
+            return this.prerequisiteEvents;
+        }
+
+        public void setPrerequisiteEvents(List<Event.Feature> prerequisiteEvents) {
+            this.prerequisiteEvents = prerequisiteEvents;
+        }
     }
 
     private final DataStoreInterface store;
@@ -36,15 +47,21 @@ public class Evaluator {
     }
 
     public EvalResult evaluate(DataModel.Flag flag, LDUser user) {
-        return this.evaluateInternal(flag, user);
+        List<Event.Feature> events = new List<Event.Feature>();
+
+        EvalResult result = this.evaluateInternal(flag, user, events);
+
+        result.setPrerequisiteEvents(events);
+
+        return result;
     }
 
-    private EvalResult evaluateInternal(DataModel.Flag flag, LDUser user) {
+    private EvalResult evaluateInternal(DataModel.Flag flag, LDUser user, List<Event.Feature> eventsOut) {
         if (!flag.isOn()) {
             return getOffValue(flag, EvaluationReason.off());
         }
 
-        EvaluationReason prereqFailureReason = this.checkPrerequisites(flag, user);
+        EvaluationReason prereqFailureReason = this.checkPrerequisites(flag, user, eventsOut);
         if (prereqFailureReason != null) {
             return this.getOffValue(flag, prereqFailureReason);
         }
@@ -69,7 +86,27 @@ public class Evaluator {
         return this.getValueForVariationOrRollout(flag, flag.getFallthrough(), user, EvaluationReason.fallthrough());
     }
 
-    private EvaluationReason checkPrerequisites(DataModel.Flag flag, LDUser user) {
+    private Boolean isExperiment(DataModel.Flag flag, EvaluationReason reason) {
+        switch on reason.getKind() {
+            when FALLTHROUGH {
+                return flag.getTrackEventsFallthrough();
+            }
+            when RULE_MATCH {
+                Integer index = reason.getRuleIndex();
+
+                if (index >= 0 && index < flag.getRules().size()) {
+                    return flag.getRules().get(index).shouldTrackEvents();
+                }
+
+                return false;
+            }
+            when else {
+                return false;
+            }
+        }
+    }
+
+    private EvaluationReason checkPrerequisites(DataModel.Flag flag, LDUser user, List<Event.Feature> eventsOut) {
         for (DataModel.Prerequisite prereq : flag.getPrerequisites()) {
             Boolean prereqOk = true;
 
@@ -78,11 +115,28 @@ public class Evaluator {
             if (prereqFeatureFlag == null) {
                 prereqOk = false;
             } else {
-                EvalResult prereqEvalResult = this.evaluateInternal(prereqFeatureFlag, user);
+                EvalResult prereqEvalResult = this.evaluateInternal(prereqFeatureFlag, user, eventsOut);
 
                 if (!prereqFeatureFlag.isOn() || prereqEvalResult.getVariationIndex() != prereq.getVariation()) {
                     prereqOk = false;
                 }
+
+                Boolean requireExperimentData =
+                    this.isExperiment(prereqFeatureFlag, prereqEvalResult.getReason());
+
+                Event.Feature event = new Event.Feature(
+                    prereq.getKey(), // key
+                    user, // user
+                    prereqFeatureFlag.getVersion(), // version
+                    prereqEvalResult.getVariationIndex(), // variation
+                    prereqEvalResult.getValue(), // value
+                    null, // defaultValue
+                    prereqEvalResult.getReason(), // reason
+                    flag.getKey(), // prereqOf
+                    requireExperimentData || prereqFeatureFlag.getTrackEvents(), // trackEvents
+                    prereqFeatureFlag.getDebugEventsUntilDate(), // debugEventsUntilDate
+                    false // debug
+                );
             }
 
             if (!prereqOk) {

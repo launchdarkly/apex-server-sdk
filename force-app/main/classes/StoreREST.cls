@@ -1,5 +1,5 @@
 @RestResource(urlMapping='/store')
-global with sharing class REST {
+global with sharing class StoreREST {
     @HttpGet
     global static String doGet() {
         LDConfig config = new LDConfig.Builder('sdk-xyz').build();
