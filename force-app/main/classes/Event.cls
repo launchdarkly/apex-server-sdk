@@ -71,6 +71,7 @@ public class Event {
         private final Double           debugEventsUntilDate;
         private final EvaluationReason reason;
         private final Boolean          debug;
+        private final Boolean          unknown;
 
         public Feature(
             String           key,
@@ -83,11 +84,11 @@ public class Event {
             String           prereqOf,
             Boolean          trackEvents,
             Double           debugEventsUntilDate,
-            Boolean          debug
+            Boolean          debug,
+            Boolean          unknown
         ) {
             System.assertNotEquals(key, null);
             System.assertNotEquals(value, null);
-            System.assertNotEquals(reason, null);
             System.assertNotEquals(trackEvents, null);
             System.assertNotEquals(debug, null);
 
@@ -102,6 +103,7 @@ public class Event {
             this.debugEventsUntilDate = debugEventsUntilDate;
             this.reason               = reason;
             this.debug                = debug;
+            this.unknown              = unknown;
         }
 
         public Object toGeneric() {
@@ -110,6 +112,30 @@ public class Event {
             event.put('kind', 'feature');
 
             return event;
+        }
+
+        public String getKey() {
+            return this.key;
+        }
+
+        public Integer getVariation() {
+            return this.variation;
+        }
+
+        public Integer getVersion() {
+            return this.version;
+        }
+
+        public LDValue getDefaultValue() {
+            return this.defaultValue;
+        }
+
+        public LDValue getValue() {
+            return this.value;
+        }
+
+        public Boolean getUnknown() {
+            return this.unknown;
         }
     }
 }

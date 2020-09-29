@@ -148,28 +148,6 @@ public class LDClient {
 
     private Evaluator.EvalResult evaluateInternal(String featureKey, LDUser user, LDValue defaultValue, Boolean checkType) {
         try {
-            if (user == NULL || user.getKey() == NULL) {
-                EvaluationReason reason = EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED);
-
-                Event.Feature event = new Event.Feature(
-                    featureKey, // key
-                    user, // user
-                    null, // version
-                    null, // variation
-                    defaultValue, // value
-                    defaultValue, // defaultValue
-                    reason, // reason
-                    null, // prereqOf
-                    false, // trackEvents
-                    null, // debugEventsUntilDate
-                    false // debug
-                );
-
-                this.eventSink.sinkFeature(event);
-
-                return new Evaluator.EvalResult(defaultValue, -1, reason);
-            }
-
             DataModel.Flag flag = this.store.getFlag(featureKey);
 
             if (flag == null) {
@@ -186,7 +164,8 @@ public class LDClient {
                     null, // prereqOf
                     false, // trackEvents
                     null, // debugEventsUntilDate
-                    false // debug
+                    false, // debug
+                    true // unknown
                 );
 
                 this.eventSink.sinkFeature(event);
@@ -194,6 +173,28 @@ public class LDClient {
                 return new Evaluator.EvalResult(defaultValue, -1, reason);
             }
 
+            if (user == NULL || user.getKey() == NULL) {
+                EvaluationReason reason = EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED);
+
+                Event.Feature event = new Event.Feature(
+                    featureKey, // key
+                    user, // user
+                    null, // version
+                    null, // variation
+                    defaultValue, // value
+                    defaultValue, // defaultValue
+                    reason, // reason
+                    null, // prereqOf
+                    false, // trackEvents
+                    null, // debugEventsUntilDate
+                    false, // debug
+                    false // unknown
+                );
+
+                this.eventSink.sinkFeature(event);
+
+                return new Evaluator.EvalResult(defaultValue, -1, reason);
+            }
 
             Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user);
 
@@ -211,7 +212,8 @@ public class LDClient {
                     null, // prereqOf
                     flag.getTrackEvents(), // trackEvents
                     flag.getDebugEventsUntilDate(), // debugEventsUntilDate
-                    false // debug
+                    false, // debug
+                    false // unknown
                 );
 
                 this.eventSink.sinkFeature(event);

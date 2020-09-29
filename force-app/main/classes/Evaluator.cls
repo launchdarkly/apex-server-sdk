@@ -135,7 +135,8 @@ public class Evaluator {
                     flag.getKey(), // prereqOf
                     requireExperimentData || prereqFeatureFlag.getTrackEvents(), // trackEvents
                     prereqFeatureFlag.getDebugEventsUntilDate(), // debugEventsUntilDate
-                    false // debug
+                    false, // debug
+                    false // unknown
                 );
             }
 
