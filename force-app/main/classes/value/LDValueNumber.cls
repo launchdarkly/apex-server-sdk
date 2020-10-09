@@ -8,6 +8,14 @@ public class LDValueNumber extends LDValue {
             return new LDValueNumber(value);
         }
     }
+    
+    public static LDValueNumber fromDecimal(Decimal value) {
+        if (value == null) {
+            return null;
+        } else {
+            return new LDValueNumber((Double)value);
+        }
+    }
 
     public static LDValueNumber fromInteger(Integer value) {
         if (value == null) {
@@ -32,9 +40,17 @@ public class LDValueNumber extends LDValue {
     public override Integer intValue() {
         return this.value.intValue();
     }
+    
+    public override Long longValue() {
+        return this.value.longValue();
+    }
 
     public override Boolean isInt(){
         return this.value == (Double)((Integer)this.value);
+    }
+    
+    public override Boolean isNumber(){
+        return true;
     }
 
     public override Object toGeneric() {

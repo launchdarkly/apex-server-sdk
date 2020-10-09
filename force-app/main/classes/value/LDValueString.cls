@@ -24,4 +24,8 @@ public class LDValueString extends LDValue {
     public override Object toGeneric() {
         return (Object)this.value;
     }
+    
+    public override Boolean isString() {
+        return true;
+    }
 }

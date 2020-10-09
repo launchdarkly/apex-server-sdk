@@ -12,6 +12,10 @@ public abstract class LDValue {
     public static LDValue of(Double value) {
         return LDValueNumber.fromDouble(value);
     }
+    
+    public static LDValue of(Decimal value) {
+        return LDValueNumber.fromDecimal(value);
+    }
 
     public static LDValue of(String value) {
         return LDValueString.fromString(value);
@@ -40,6 +44,10 @@ public abstract class LDValue {
     public virtual Integer intValue() {
         return 0;
     }
+    
+    public virtual Long longValue() {
+        return 0;
+    }
 
     public virtual String stringValue() {
         return '';
@@ -63,5 +71,21 @@ public abstract class LDValue {
 
     public virtual Boolean isInt() {
         return false;
+    }
+    
+    public virtual Boolean isNumber() {
+        return false;
+    }
+
+    public virtual Boolean isString() {
+        return false;
+    }
+
+    public Boolean equals(LDValue other) {
+        if (this.getType() == other.getType()) {
+            return this.toGeneric() == other.toGeneric();
+        } else {
+            return false;
+        }
     }
 }
