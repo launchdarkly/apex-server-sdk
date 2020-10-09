@@ -48,11 +48,13 @@ private class LDClientTest {
         LDUser   user   = new LDUser.Builder('user-key').build();
         LDClient client = new LDClient(config);
 
+        client.getTime = new GetTimeMock();
+
         client.identify(user);
 
         List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
 
-        String expected = '{"user":{"key":"user-key"},"key":"user-key","kind":"identify"}';
+        String expected = '{"creationDate":1,"user":{"key":"user-key"},"key":"user-key","kind":"identify"}';
 
         System.assertEquals(events.size(), 1);
         System.assertEquals(events.get(0).Kind__c, 'identify');
@@ -63,12 +65,14 @@ private class LDClientTest {
         LDConfig config = new LDConfig.Builder('sdk-xyz').build();
         LDUser   user   = new LDUser.Builder('user-key').build();
         LDClient client = new LDClient(config);
+        
+        client.getTime = new GetTimeMock();
 
         client.track(user, 'abc', null, null);
 
         List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
 
-        String expected = '{"user":{"key":"user-key"},"key":"abc","kind":"custom"}';
+        String expected = '{"creationDate":1,"user":{"key":"user-key"},"key":"abc","kind":"custom"}';
 
         System.assertEquals(events.size(), 1);
         System.assertEquals(events.get(0).Kind__c, 'custom');
@@ -80,12 +84,14 @@ private class LDClientTest {
         LDUser   user   = new LDUser.Builder('user-key').build();
         LDClient client = new LDClient(config);
         LDValue  value  = new LDValueObject.Builder().set('a', LDValue.of(true)).build();
+        
+        client.getTime = new GetTimeMock();
 
         client.track(user, '123', (Double)52.1, value);
 
         List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
 
-        String expected = '{"data":{"a":true},"metricValue":52.1,'
+        String expected = '{"creationDate":1,"data":{"a":true},"metricValue":52.1,'
             + '"user":{"key":"user-key"},"key":"123","kind":"custom"}';
 
         System.assertEquals(events.size(), 1);

@@ -3,6 +3,7 @@ public class LDClient {
     private final DataStoreInterface store;
     private final Evaluator          evaluator;
     private final EventSinkInterface eventSink;
+    public        GetTimeInterface   getTime;
 
     public class EvaluationDetail {
         private Integer          variationIndex;
@@ -25,8 +26,9 @@ public class LDClient {
     public LDClient(LDConfig config) {
         this.config    = config;
         this.store     = new DataStore();
-        this.evaluator = new Evaluator(this.store);
         this.eventSink = new EventSink();
+        this.getTime   = new GetTimeImpl();
+        this.evaluator = new Evaluator(this.store, this.getTime);
     }
 
     public Boolean boolVariation(LDUser user, String key, Boolean fallback) {
@@ -135,7 +137,7 @@ public class LDClient {
             return;
         }
 
-        this.eventSink.sinkIdentify(new Event.Identify(user));
+        this.eventSink.sinkIdentify(new Event.Identify(user, this.getTime.now()));
     }
 
     public void track(LDUser user, String key, Double optionalMetric, LDValue optionalValue) {
@@ -143,7 +145,7 @@ public class LDClient {
             return;
         }
 
-        this.eventSink.sinkCustom(new Event.Custom(user, key, optionalMetric, optionalValue));
+        this.eventSink.sinkCustom(new Event.Custom(user, key, optionalMetric, optionalValue, this.getTime.now()));
     }
 
     private Evaluator.EvalResult evaluateInternal(String featureKey, LDUser user, LDValue defaultValue, Boolean checkType) {
@@ -165,7 +167,8 @@ public class LDClient {
                     false, // trackEvents
                     null, // debugEventsUntilDate
                     false, // debug
-                    true // unknown
+                    true, // unknown
+                    this.getTime.now() // now
                 );
 
                 this.eventSink.sinkFeature(event);
@@ -188,7 +191,8 @@ public class LDClient {
                     false, // trackEvents
                     null, // debugEventsUntilDate
                     false, // debug
-                    false // unknown
+                    false, // unknown
+                    this.getTime.now() // now
                 );
 
                 this.eventSink.sinkFeature(event);
@@ -201,6 +205,9 @@ public class LDClient {
             if (evalResult.getValue() == null) {
                 return new Evaluator.EvalResult(defaultValue, -1, evalResult.getReason());
             } else {
+                Boolean requireExperimentData =
+                    this.evaluator.isExperiment(flag, evalResult.getReason());
+
                 Event.Feature event = new Event.Feature(
                     featureKey, // key
                     user, // user
@@ -210,10 +217,11 @@ public class LDClient {
                     defaultValue, // defaultValue
                     evalResult.getReason(), // reason
                     null, // prereqOf
-                    flag.getTrackEvents(), // trackEvents
+                    requireExperimentData || flag.getTrackEvents(), // trackEvents
                     flag.getDebugEventsUntilDate(), // debugEventsUntilDate
                     false, // debug
-                    false // unknown
+                    false, // unknown
+                    this.getTime.now() // now
                 );
 
                 this.eventSink.sinkFeature(event);

@@ -41,9 +41,11 @@ public class Evaluator {
     }
 
     private final DataStoreInterface store;
+    private final GetTimeInterface   getTime;
 
-    public Evaluator(DataStoreInterface store) {
-        this.store = store;
+    public Evaluator(DataStoreInterface store, GetTimeInterface getTime) {
+        this.store   = store;
+        this.getTime = getTime;
     }
 
     public EvalResult evaluate(DataModel.Flag flag, LDUser user) {
@@ -86,7 +88,7 @@ public class Evaluator {
         return this.getValueForVariationOrRollout(flag, flag.getFallthrough(), user, EvaluationReason.fallthrough());
     }
 
-    private Boolean isExperiment(DataModel.Flag flag, EvaluationReason reason) {
+    public Boolean isExperiment(DataModel.Flag flag, EvaluationReason reason) {
         switch on reason.getKind() {
             when FALLTHROUGH {
                 return flag.getTrackEventsFallthrough();
@@ -136,7 +138,8 @@ public class Evaluator {
                     requireExperimentData || prereqFeatureFlag.getTrackEvents(), // trackEvents
                     prereqFeatureFlag.getDebugEventsUntilDate(), // debugEventsUntilDate
                     false, // debug
-                    false // unknown
+                    false, // unknown
+                    this.getTime.now() // now
                 );
             }
 
@@ -319,8 +322,20 @@ public class Evaluator {
 
         return null;
     }
+    
+    public Decimal hexToDecimal(String input) {
+        String alphabet = '0123456789abcdef';
 
-    private Double bucketUser(LDUser user, String key, String attr, String salt) {
+        Decimal acc = 0;
+
+        for(Integer index = 0; index < input.length(); index++) {
+            acc = (acc * 16) + alphabet.indexOf(input.subString(index, index + 1));
+
+        }
+        return acc;
+    }
+
+    public Double bucketUser(LDUser user, String key, String attr, String salt) {
         LDValue userValue = user.getAttribute(attr == null ? 'key' : attr);
         String idHash = this.getBucketableStringValue(userValue);
 
@@ -330,12 +345,13 @@ public class Evaluator {
             }
 
             Blob targetBlob = Blob.valueOf(key + '.' + salt + '.' + idHash);
-            String hash = EncodingUtil.convertFromHex(EncodingUtil.convertToHex(
-                Crypto.generateDigest('SHA1', targetBlob)).substring(0, 15)).toString();
 
-            long longVal = long.valueOf(hash);
+            String hash = EncodingUtil.convertToHex(Crypto.generateDigest('SHA1', targetBlob))
+                .substring(0, 15);
+                
+            Double full = (Double)this.hexToDecimal(hash) / Double.valueOf('1152921504606846975');
 
-            return (Double)longVal / Double.valueOf('1152921504606846975');
+            return (Double)((Decimal)(full)).setScale(8);
         }
 
         return 0;

@@ -22,7 +22,8 @@ private class EventProcessorTest {
             false, // trackEvents
             null, // debugEventsUntilDate
             false, // debug
-            false // unknown
+            false, // unknown
+            1 // now
         );
 
         Event.Feature event2 = new Event.Feature(
@@ -37,7 +38,8 @@ private class EventProcessorTest {
             false, // trackEvents
             null, // debugEventsUntilDate
             false, // debug
-            false // unknown
+            false, // unknown
+            2 // now
         );
 
         Event.Feature event3 = new Event.Feature(
@@ -52,7 +54,8 @@ private class EventProcessorTest {
             false, // trackEvents
             null, // debugEventsUntilDate
             false, // debug
-            false // unknown
+            false, // unknown
+            3 // now
         );
 
         Event.Feature event4 = new Event.Feature(
@@ -67,7 +70,8 @@ private class EventProcessorTest {
             false, // trackEvents
             null, // debugEventsUntilDate
             false, // debug
-            false // unknown
+            false, // unknown
+            4 // now
         );
 
         Event.Feature event5 = new Event.Feature(
@@ -82,10 +86,11 @@ private class EventProcessorTest {
             false, // trackEvents
             null, // debugEventsUntilDate
             false, // debug
-            true // unknown
+            true, // unknown
+            5 // now
         );
 
-        EventProcessor processor = new EventProcessor();
+        EventProcessor processor = new EventProcessor(new GetTimeMock());
 
         processor.summarizeFeatureEvent(event1);
         processor.summarizeFeatureEvent(event2);
@@ -136,9 +141,167 @@ private class EventProcessorTest {
                     '"default": "default2"' +
                 '}' +
             '},' +
-            '"kind": "summary"' +
+            '"kind": "summary",' +
+            '"startDate": 1,' +
+            '"endDate": 2' +
         '}';
 
         System.assertEquals(summaryEvent, JSON.deserializeUntyped(expectedRaw));
+    }
+
+    @isTest static void processFeatureEvent() {
+        LDUser  user  = new LDUser.Builder('abc').build();
+        LDValue value = LDValue.of('value');
+
+        Event.Feature event = new Event.Feature(
+            'key1', // key
+            user, // user
+            11, // version
+            1, // variation
+            value, // value
+            value, // defaultValue
+            null, // reason
+            null, // prereqOf
+            false, // trackEvents
+            null, // debugEventsUntilDate
+            false, // debug
+            false, // unknown
+            6 // now
+        );
+
+        EventProcessor processor = new EventProcessor(new GetTimeMock());
+
+        processor.processFeatureEvent(event);
+    }
+    
+    @isTest static void withoutEventsBundleIsEmpty() {
+        EventProcessor processor = new EventProcessor(new GetTimeMock());
+        
+        Object bundle = processor.buildEventBundle();
+        
+        List<Object> expected = new List<Object>();
+        
+        System.assertEquals(bundle, (Object)expected);
+    }
+    
+    @isTest static void eventBundleIncludesProcessed() {
+        EventProcessor processor = new EventProcessor(new GetTimeMock());
+        // does not actually matter what the value is
+        processor.addProcessedEvent(52);
+        
+        Object bundle = processor.buildEventBundle();
+
+        List<Object> expected = new List<Object>();
+        expected.add(52);
+        
+        System.assertEquals(bundle, (Object)expected);
+    }
+    
+    @isTest static void eventBundleIncludesSummary() {
+        EventProcessor processor = new EventProcessor(new GetTimeMock());
+
+        Event.Feature event1 = new Event.Feature(
+            'key1', // key
+            new LDUser.Builder('abc').build(), // user
+            11, // version
+            1, // variation
+            LDValue.of('value1'), // value
+            LDValue.of('default1'), // defaultValue
+            null, // reason
+            null, // prereqOf
+            false, // trackEvents
+            null, // debugEventsUntilDate
+            false, // debug
+            false, // unknown
+            1 // now
+        );
+        
+        processor.summarizeFeatureEvent(event1);
+        
+        String expectedRaw = '[{' +
+            '"features": {' +
+                '"key1": {' +
+                    '"counters": [' +
+                        '{' +
+                            '"count": 1,' +
+                            '"value": "value1",' +
+                            '"variation": 1,' +
+                            '"version": 11' +
+                        '}' +
+                    '],' +
+                    '"default": "default1"' +
+                '}' +
+            '},' +
+            '"kind": "summary",' +
+            '"startDate": 1,' +
+            '"endDate": 2' +
+        '}]';
+        
+        Object bundle = processor.buildEventBundle();
+
+        System.assertEquals(bundle, JSON.deserializeUntyped(expectedRaw));
+    }
+    
+    @isTest static void trackFeatureEventIncluded() {
+        EventProcessor processor = new EventProcessor(new GetTimeMock());
+
+        Event.Feature event1 = new Event.Feature(
+            'key1', // key
+            new LDUser.Builder('abc').build(), // user
+            11, // version
+            1, // variation
+            LDValue.of('value1'), // value
+            LDValue.of('default1'), // defaultValue
+            null, // reason
+            null, // prereqOf
+            true, // trackEvents
+            null, // debugEventsUntilDate
+            false, // debug
+            false, // unknown
+            1 // now
+        );
+        
+        processor.processFeatureEvent(event1);
+        
+        String expectedRaw = '[' +
+            '{' +
+                '"kind": "feature",' +
+                '"key": "key1",' +
+                '"creationDate": 1,' +
+                '"debug": false,' +
+                '"defaultValue": "default1",' +
+                '"trackEvents": true,' +
+                '"unknown": false,' +
+                '"value": "value1",' +
+                '"variation": 1,' +
+                '"version": 11,' +
+                '"user": {"key":"abc"}' +
+            '},' +
+            '{' +
+                '"features": {' +
+                    '"key1": {' +
+                        '"counters": [' +
+                            '{' +
+                                '"count": 1,' +
+                                '"value": "value1",' +
+                                '"variation": 1,' +
+                                '"version": 11' +
+                            '}' +
+                        '],' +
+                        '"default": "default1"' +
+                    '}' +
+                '},' +
+                '"kind": "summary",' +
+                '"startDate": 1,' +
+                '"endDate": 2' +
+            '}' +
+        ']';
+        
+        Object bundle = processor.buildEventBundle();
+        
+        // fix errors with numeric types not matching
+        Object bundleIso = JSON.deserializeUntyped(JSON.serialize(bundle));
+
+        System.assertEquals(bundleIso, JSON.deserializeUntyped(expectedRaw));
     }
 }

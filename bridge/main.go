@@ -14,6 +14,7 @@ import (
 
 const (
 	LD_BASE_URI   = "https://app.launchdarkly.com"
+	LD_EVENTS_URI = "https://events.launchdarkly.com"
 	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
 	POLL_INTERVAL = 30 * time.Second
 )
@@ -82,6 +83,77 @@ func getAuthorization() string {
 	return parsed.AccessToken
 }
 
+func eventLoop(salesforceURL string, launchDarklyKey string, salesforceToken string) {
+	client := &http.Client{}
+	pollURI := salesforceURL + "event"
+	pushURI := LD_EVENTS_URI + "/bulk"
+
+	for {
+		pollRequest, err := http.NewRequest("GET", pollURI, nil)
+		
+		pollRequest.Header.Set("Content-Type", "application/json")
+		pollRequest.Header.Set("Authorization", "Bearer " + salesforceToken)
+		
+		log.Print("requesting events from: " + pollURI)
+
+		pollResponse, err := client.Do(pollRequest)
+		
+		if err != nil {
+			log.Print("poll flags failed")
+
+			goto End
+		} else {
+			if pollResponse.StatusCode != 200 {
+				log.Print("poll expected 200")
+
+				goto End
+			}
+			
+			pollBytes, err := ioutil.ReadAll(pollResponse.Body)
+
+			if err != nil {
+				log.Panic("failed to read poll response body")
+			}
+
+			pollString := string(pollBytes)
+			log.Print(pollString)
+			
+			pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewBuffer(pollBytes))
+			
+			if err != nil {
+				log.Panic("failed constructing push request ", err)
+			}
+			
+			pushRequest.Header.Set("Content-Type", "application/json")
+			pushRequest.Header.Set("X-LaunchDarkly-Event-Schema", "3")
+			pushRequest.Header.Set("Authorization", launchDarklyKey)
+			
+			log.Print("pushing events to: " + pushURI)
+			
+			pushResponse, err := client.Do(pushRequest)
+			
+			if err != nil {
+				log.Panic("failed pushing events to LaunchDarkly")
+			}
+
+			if pushResponse.StatusCode == 401 || pushResponse.StatusCode == 403 {
+				log.Panic("pushing flags unauthorized")
+			}
+
+			if pushResponse.StatusCode != 200 && pushResponse.StatusCode != 202 {
+				log.Print("push expected 200/202 got: ", pushResponse.StatusCode);
+
+				goto End
+			}
+		}
+
+	End:
+		log.Print("event polling waiting for: ", POLL_INTERVAL)
+
+		time.Sleep(POLL_INTERVAL)
+	}
+}
+
 func main() {
 	LD_SDK_KEY := getEnvRequired("LD_SDK_KEY")
 	SALESFORCE_URL := getEnvRequired("SALESFORCE_URL")
@@ -89,6 +161,8 @@ func main() {
 	tokenSalesForce := getAuthorization()
 
 	client := &http.Client{}
+	
+	go eventLoop(SALESFORCE_URL, LD_SDK_KEY, tokenSalesForce);
 
 	var etag = ""
 
@@ -176,7 +250,7 @@ func main() {
 		}
 
 	End:
-		log.Print("waiting for: ", POLL_INTERVAL)
+		log.Print("feature polling waiting for: ", POLL_INTERVAL)
 
 		time.Sleep(POLL_INTERVAL)
 	}

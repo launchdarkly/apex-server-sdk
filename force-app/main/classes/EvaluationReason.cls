@@ -112,4 +112,78 @@ public class EvaluationReason {
     public Integer getRuleIndex() {
         return this.ruleIndex;
     }
+
+    public String kindToString(Kind kind) {
+        switch on kind {
+            when OFF {
+                return 'OFF';
+            }
+            when FALLTHROUGH {
+                return 'FALLTHROUGH';
+            }
+            when TARGET_MATCH {
+                return 'TARGET_MATCH';
+            }
+            when RULE_MATCH {
+                return 'RULE_MATCH';
+            }
+            when PREREQUISITE_FAILED {
+                return 'PREREQUISITE_FAILED';
+            }
+            when ERROR {
+                return 'ERROR';
+            }
+        }
+
+        return 'unknown';
+    }
+
+    public String errorKindToString(ErrorKind errorKind) {
+        switch on errorKind {
+            when CLIENT_NOT_READY {
+                return 'CLIENT_NOT_READY';
+            }
+            when FLAG_NOT_FOUND {
+                return 'FLAG_NOT_FOUND';
+            }
+            when MALFORMED_FLAG {
+                return 'MALFORMED_FLAG';
+            }
+            when USER_NOT_SPECIFIED {
+                return 'USER_NOT_SPECIFIED';
+            }
+            when WRONG_TYPE {
+                return 'WRONG_TYPE';
+            }
+            when EXCEPTION_THROWN {
+                return 'EXCEPTION_THROWN';
+            }
+        }
+
+        return 'unknown';
+    }
+
+    public Object toGeneric() {
+        Map<String, Object> rep = new Map<String, Object>();
+
+        rep.put('kind', this.kindToString(this.kind));
+
+        switch on this.kind {
+            when ERROR {
+                rep.put('errorKind', this.errorKindToString(this.errorKind));
+            }
+            when PREREQUISITE_FAILED {
+                rep.put('prerequisiteKey', this.prerequisiteKey);
+            }
+            when RULE_MATCH {
+                rep.put('ruleIndex', this.ruleIndex);
+                rep.put('ruleId', this.ruleId);
+            }
+            when else {
+                // nothing
+            }
+        }
+
+        return (Object)rep;
+    }
 }

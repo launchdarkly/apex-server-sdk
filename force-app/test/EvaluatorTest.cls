@@ -29,7 +29,7 @@ private class EvaluatorTest {
         flag.fieldOn = false;
         flag.variations.add(LDValue.of(true));
 
-        Evaluator evaluator = new Evaluator(store);
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
 
         LDUser user = new LDUser.Builder('abc').build();
 
@@ -48,7 +48,7 @@ private class EvaluatorTest {
         flag.fallthrough.variation = 0;
         flag.variations.add(LDValue.of(true));
 
-        Evaluator evaluator = new Evaluator(store);
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
 
         LDUser user = new LDUser.Builder('abc').build();
 
@@ -71,7 +71,7 @@ private class EvaluatorTest {
         target.values.add('abc');
         flag.targets.add(target);
 
-        Evaluator evaluator = new Evaluator(store);
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
 
         LDUser user = new LDUser.Builder('abc').build();
 
@@ -94,7 +94,7 @@ private class EvaluatorTest {
         target.values.add('abc1');
         flag.targets.add(target);
 
-        Evaluator evaluator = new Evaluator(store);
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
 
         LDUser user = new LDUser.Builder('abc').build();
 
@@ -122,7 +122,7 @@ private class EvaluatorTest {
 
         store.flags.put('other', flagSub);
 
-        Evaluator evaluator = new Evaluator(store);
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
 
         LDUser user = new LDUser.Builder('abc').build();
 
@@ -151,7 +151,7 @@ private class EvaluatorTest {
 
         store.flags.put('other', flagSub);
 
-        Evaluator evaluator = new Evaluator(store);
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
 
         LDUser user = new LDUser.Builder('abc').build();
 
@@ -183,7 +183,7 @@ private class EvaluatorTest {
 
         store.segments.put('segment', segment);
 
-        Evaluator evaluator = new Evaluator(store);
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
 
         LDUser user = new LDUser.Builder('abc').build();
 
@@ -192,5 +192,19 @@ private class EvaluatorTest {
         System.assertEquals(result.getValue().booleanValue(), true);
         System.assertEquals(result.getVariationIndex(), 0);
         System.assertEquals(result.getReason().getKind(), EvaluationReason.Kind.RULE_MATCH);
+    }
+    
+    @isTest static void bucketUser() {
+        DataStoreMock store = new DataStoreMock();
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
+
+        Double v1 = evaluator.bucketUser(new LDUser.Builder('userKeyA').build(), 'hashKey', 'key', 'saltyA');
+        System.assertEquals(v1, (Double)0.42157587);
+        
+        Double v2 = evaluator.bucketUser(new LDUser.Builder('userKeyB').build(), 'hashKey', 'key', 'saltyA');
+        System.assertEquals(v2, (Double)0.6708485);
+        
+        Double v3 = evaluator.bucketUser(new LDUser.Builder('userKeyC').build(), 'hashKey', 'key', 'saltyA');
+        System.assertEquals(v3, (Double)0.10343106);
     }
 }
