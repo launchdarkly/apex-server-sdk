@@ -68,6 +68,15 @@ public class EvaluatorOperators {
             when 'after' {
                 return compareDate(ComparisonOp.GT, userValue, clauseValue);
             }
+            when 'semVerEqual' {
+                return compareSemanticVersion(ComparisonOp.EQ, userValue, clauseValue);
+            }
+            when 'semVerGreaterThan' {
+                return compareSemanticVersion(ComparisonOp.GT, userValue, clauseValue);
+            }
+            when 'semVerLessThan' {
+                return compareSemanticVersion(ComparisonOp.LT, userValue, clauseValue);
+            }
             when else {
                 return false;
             }
@@ -128,6 +137,22 @@ public class EvaluatorOperators {
         return test(op, userDate == clauseDate ? 0 : (userDate < clauseDate ? -1 : 1));
     }
     
+    private static Boolean compareSemanticVersion(ComparisonOp op, LDValue userValue, LDValue clauseValue) {
+        SemanticVersion n1 = valueToSemanticVersion(userValue);
+
+        if (n1 == null) {
+            return false;
+        }
+        
+        SemanticVersion n2 = valueToSemanticVersion(clauseValue);
+
+        if (n2 == null) {
+            return false;
+        }
+
+        return test(op, n1.compare(n2));
+    }
+    
     private static DateTime valueToDateTime(LDValue value) {
         if (value.isNumber()) {
             return DateTime.newInstance(value.longValue());
@@ -137,6 +162,14 @@ public class EvaluatorOperators {
             } catch (Exception err) {
                 return null;
             }
+        } else {
+            return null;
+        }
+    }
+    
+    private static SemanticVersion valueToSemanticVersion(LDValue value) {
+        if (value.isString()) {
+            return SemanticVersion.parse(value.stringValue());
         } else {
             return null;
         }

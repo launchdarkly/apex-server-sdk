@@ -88,6 +88,7 @@ private class EvaluatorOperatorTest {
     private static final LDValue dateMs1 = LDValue.of(10000000);
     private static final LDValue dateMs2 = LDValue.of(10000001);
     private static final LDValue invalidDate = LDValue.of('hey what\'s this?');
+    private static final LDValue invalidVer = LDValue.of('xbad%ver');
 
     @isTest static void dateComparison() {
         System.assertEquals(EvaluatorOperators.apply('before', dateStr1, dateStr2), true);
@@ -100,7 +101,7 @@ private class EvaluatorOperatorTest {
         System.assertEquals(EvaluatorOperators.apply('before', dateMs1, dateMs1), false);
         System.assertEquals(EvaluatorOperators.apply('before', dateStr1, invalidDate), false);
         System.assertEquals(EvaluatorOperators.apply('before', invalidDate, dateStr1), false);
-        
+
         System.assertEquals(EvaluatorOperators.apply('after', dateStr1, dateStr2), false);
         System.assertEquals(EvaluatorOperators.apply('after', dateStrUtc1, dateStrUtc2), false);
         System.assertEquals(EvaluatorOperators.apply('after', dateMs1, dateMs2), false);
@@ -111,5 +112,33 @@ private class EvaluatorOperatorTest {
         System.assertEquals(EvaluatorOperators.apply('after', dateMs1, dateMs1), false);
         System.assertEquals(EvaluatorOperators.apply('after', dateStr1, invalidDate), false);
         System.assertEquals(EvaluatorOperators.apply('after', invalidDate, dateStr1), false);
+    }
+    
+    @isTest static void semVerComparison() {
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of('2.0.1'), LDValue.of('2.0.1')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of('2.0.2'), LDValue.of('2.0.1')), false);
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of('2.0'), LDValue.of('2.0.0')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of('2'), LDValue.of('2.0.0')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of('2-rc1'), LDValue.of('2.0.0-rc1')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of('2+build1'), LDValue.of('2.0.0+build1')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of('abc'), LDValue.of('2.0.1')), false);
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of(2), LDValue.of('2.0.1')), false);
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of('2.0.1'), LDValue.of('abc')), false);
+        System.assertEquals(EvaluatorOperators.apply('semVerEqual', LDValue.of('2.0.1'), LDValue.of(2)), false);
+
+        System.assertEquals(EvaluatorOperators.apply('semVerLessThan', LDValue.of('2.0.0'), LDValue.of('2.0.1')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerLessThan', LDValue.of('2.0'), LDValue.of('2.0.1')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerLessThan', LDValue.of('2.0.1'), LDValue.of('2.0.0')), false);
+        System.assertEquals(EvaluatorOperators.apply('semVerLessThan', LDValue.of('2.0.1'), LDValue.of('2')), false);
+        System.assertEquals(EvaluatorOperators.apply('semVerLessThan', LDValue.of('2.0.0-rc'), LDValue.of('2.0.0')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerLessThan', LDValue.of('2.0.0-rc'), LDValue.of('2.0.0-rc.beta')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerLessThan', LDValue.of('2.0.1'), invalidVer), false);
+
+        System.assertEquals(EvaluatorOperators.apply('semVerGreaterThan', LDValue.of('2.0.1'), LDValue.of('2.0.0')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerGreaterThan', LDValue.of('2.0.1'), LDValue.of('2.0')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerGreaterThan', LDValue.of('2.0.0'), LDValue.of('2.0.1')), false);
+        System.assertEquals(EvaluatorOperators.apply('semVerGreaterThan', LDValue.of('2.0'), LDValue.of('2.0.1')), false);
+        System.assertEquals(EvaluatorOperators.apply('semVerGreaterThan', LDValue.of('2.0.0-rc.1'), LDValue.of('2.0.0-rc.0')), true);
+        System.assertEquals(EvaluatorOperators.apply('semVerGreaterThan', LDValue.of('2.0.1'), invalidVer), false);
     }
 }
