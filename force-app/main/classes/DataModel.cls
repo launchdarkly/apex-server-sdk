@@ -210,10 +210,17 @@ public class DataModel {
             Map<String, Object> obj = (Map<String, Object>)raw;
 
             this.variation = (Integer)obj.get('variation');
-            this.values    = (List<String>)obj.get('values');
+            this.values    = new List<String>();
+            
+            List<Object> values = (List<Object>)obj.get('values');
+
+            System.assertNotEquals(values, null);
+
+            for (Object value : values) {
+                this.values.add((String)value);
+            }
 
             System.assertNotEquals(this.variation, null);
-            System.assertNotEquals(this.values, null);
         }
 
         public Integer getVariation() {
@@ -281,8 +288,6 @@ public class DataModel {
 
             System.assertNotEquals(this.ruleId, null);
             System.assertNotEquals(this.clauses, null);
-            System.assertNotEquals(this.weight, null);
-            System.assertNotEquals(this.bucketBy, null);
         }
 
         public String getId() {
@@ -332,17 +337,21 @@ public class DataModel {
             this.version  = (Integer)obj.get('version');
 
             // included
-            List<String> included = (List<String>)obj.get('included');
+            List<Object> included = (List<Object>)obj.get('included');
 
             if (included != null) {
-                this.included = new Set<String>(included);
+                for (Object item : included) {
+                    this.included.add((String)item);
+                }
             }
 
             // excluded
-            List<String> excluded = (List<String>)obj.get('excluded');
+            List<Object> excluded = (List<Object>)obj.get('excluded');
 
             if (excluded != null) {
-                this.excluded = new Set<String>(excluded);
+                for (Object item : excluded) {
+                    this.excluded.add((String)item);
+                }
             }
 
             // rules

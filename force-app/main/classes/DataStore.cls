@@ -2,8 +2,8 @@ public class DataStore implements DataStoreInterface {
     public DataStore() {
 
     }
-
-    public DataModel.Flag getFlag(String key) {
+    
+    public VersionedData__C getVersioned(String key, String kind) {
         List<VersionedData__c> versioned = [
             SELECT
                 Version__c,
@@ -14,44 +14,34 @@ public class DataStore implements DataStoreInterface {
                 VersionedData__c
             WHERE
                     (Key__c  = :key)
-                AND (Kind__c = 'flags')
+                AND (Kind__c = :kind)
             LIMIT 1
         ];
 
         if (versioned.isEmpty()) {
             return null;
         } else {
-            try {
-                return new DataModel.Flag(versioned.get(0).Raw__c);
-            } catch (Exception err) {
-                return null;
-            }
+            return versioned.get(0);
+        }
+    }
+
+    public DataModel.Flag getFlag(String key) {
+        VersionedData__c versioned = getVersioned(key, 'flags');
+
+        if (versioned == null) {
+            return null;
+        } else {
+            return new DataModel.Flag(versioned.Raw__c);
         }
     }
 
     public DataModel.Segment getSegment(String key) {
-        List<VersionedData__c> versioned = [
-            SELECT
-                Version__c,
-                Raw__c,
-                Key__c,
-                Kind__c
-            FROM
-                VersionedData__c
-            WHERE
-                    (Key__c  = :key)
-                AND (Kind__c = 'segments')
-            LIMIT 1
-        ];
+        VersionedData__c versioned = getVersioned(key, 'segments');
 
-        if (versioned.isEmpty()) {
+        if (versioned == null) {
             return null;
         } else {
-            try {
-                return new DataModel.Segment(versioned.get(0).Raw__c);
-            } catch (Exception err) {
-                return null;
-            }
+            return new DataModel.Segment(JSON.deserializeUntyped(versioned.Raw__c));
         }
     }
 
@@ -100,6 +90,10 @@ public class DataStore implements DataStoreInterface {
     }
 
     public void insertVersionedData(VersionedData value) {
-        insert value.getSObject();
+        try {
+            insert value.getSObject();
+        } catch (Exception err) {
+            // required by compiler
+        }
     }
 }

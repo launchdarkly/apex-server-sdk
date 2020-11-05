@@ -70,7 +70,7 @@ private class LDUserTest {
             .setName('alice')
             .build();
 
-        String result = JSON.serialize(user.toGeneric());
+        String result = JSON.serialize(user.toGeneric(false));
 
         System.assertEquals(result, '{"name":"alice","key":"hello"}');
     }
@@ -92,7 +92,7 @@ private class LDUserTest {
             .setCustom(custom)
             .build();
 
-        String result = JSON.serialize(user.toGeneric());
+        String result = JSON.serialize(user.toGeneric(false));
 
         String expected = '{"custom":{"a":"b"},"secondary":"8","country":"7",'
             + '"avatar":"6","name":"5","lastName":"4","firstName":"3","ip":"2",'
@@ -120,7 +120,7 @@ private class LDUserTest {
             .setPrivateAttributeNames(privateAttributeNames)
             .build();
 
-        String result = JSON.serialize(user.toGeneric());
+        String result = JSON.serialize(user.toGeneric(false));
 
         String expected = '{"privateAttrs":["lastName","private"],'
             + '"custom":{"public":"a"},"firstName":"alice","key":"hello"}';

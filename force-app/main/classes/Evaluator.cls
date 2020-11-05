@@ -48,22 +48,27 @@ public class Evaluator {
         this.getTime = getTime;
     }
 
-    public EvalResult evaluate(DataModel.Flag flag, LDUser user) {
+    public EvalResult evaluate(DataModel.Flag flag, LDUser user, Boolean includeReasonInEvents) {
         List<Event.Feature> events = new List<Event.Feature>();
 
-        EvalResult result = this.evaluateInternal(flag, user, events);
+        EvalResult result = this.evaluateInternal(flag, user, events, includeReasonInEvents);
 
         result.setPrerequisiteEvents(events);
 
         return result;
     }
 
-    private EvalResult evaluateInternal(DataModel.Flag flag, LDUser user, List<Event.Feature> eventsOut) {
+    private EvalResult evaluateInternal(
+        DataModel.Flag      flag,
+        LDUser              user,
+        List<Event.Feature> eventsOut,
+        Boolean             includeReasonInEvents
+    ) {
         if (!flag.isOn()) {
             return getOffValue(flag, EvaluationReason.off());
         }
 
-        EvaluationReason prereqFailureReason = this.checkPrerequisites(flag, user, eventsOut);
+        EvaluationReason prereqFailureReason = this.checkPrerequisites(flag, user, eventsOut, includeReasonInEvents);
         if (prereqFailureReason != null) {
             return this.getOffValue(flag, prereqFailureReason);
         }
@@ -87,6 +92,16 @@ public class Evaluator {
 
         return this.getValueForVariationOrRollout(flag, flag.getFallthrough(), user, EvaluationReason.fallthrough());
     }
+    
+    public Boolean shouldForceReason(DataModel.Flag flag, EvaluationReason reason) {
+        if (reason.getKind() == EvaluationReason.Kind.FALLTHROUGH) {
+            return flag.getTrackEventsFallthrough();
+        } else if (reason.getKind() == EvaluationReason.Kind.RULE_MATCH) {
+            return flag.getRules().get(reason.getRuleIndex()).shouldTrackEvents();
+        }
+
+        return false;
+    }
 
     public Boolean isExperiment(DataModel.Flag flag, EvaluationReason reason) {
         switch on reason.getKind() {
@@ -108,7 +123,12 @@ public class Evaluator {
         }
     }
 
-    private EvaluationReason checkPrerequisites(DataModel.Flag flag, LDUser user, List<Event.Feature> eventsOut) {
+    private EvaluationReason checkPrerequisites(
+        DataModel.Flag      flag,
+        LDUser              user,
+        List<Event.Feature> eventsOut,
+        Boolean             includeReasonInEvents
+    ) {
         for (DataModel.Prerequisite prereq : flag.getPrerequisites()) {
             Boolean prereqOk = true;
 
@@ -117,7 +137,7 @@ public class Evaluator {
             if (prereqFeatureFlag == null) {
                 prereqOk = false;
             } else {
-                EvalResult prereqEvalResult = this.evaluateInternal(prereqFeatureFlag, user, eventsOut);
+                EvalResult prereqEvalResult = this.evaluateInternal(prereqFeatureFlag, user, eventsOut, includeReasonInEvents);
 
                 if (!prereqFeatureFlag.isOn() || prereqEvalResult.getVariationIndex() != prereq.getVariation()) {
                     prereqOk = false;
@@ -125,6 +145,12 @@ public class Evaluator {
 
                 Boolean requireExperimentData =
                     this.isExperiment(prereqFeatureFlag, prereqEvalResult.getReason());
+                
+                EvaluationReason reason;
+    
+                if (includeReasonInEvents || this.shouldForceReason(prereqFeatureFlag, prereqEvalResult.getReason())) {
+                    reason = prereqEvalResult.getReason();
+                }
 
                 Event.Feature event = new Event.Feature(
                     prereq.getKey(), // key
@@ -133,13 +159,14 @@ public class Evaluator {
                     prereqEvalResult.getVariationIndex(), // variation
                     prereqEvalResult.getValue(), // value
                     null, // defaultValue
-                    prereqEvalResult.getReason(), // reason
+                    reason, // reason
                     flag.getKey(), // prereqOf
                     requireExperimentData || prereqFeatureFlag.getTrackEvents(), // trackEvents
                     prereqFeatureFlag.getDebugEventsUntilDate(), // debugEventsUntilDate
                     false, // debug
                     false, // unknown
-                    this.getTime.now() // now
+                    this.getTime.now(), // now
+                    false // allAttributesPrivate
                 );
             }
 
@@ -155,7 +182,7 @@ public class Evaluator {
         Integer offVariation = flag.getOffVariation();
 
         if (offVariation == null) {
-            return new EvalResult(null, -1, reason);
+            return new EvalResult(null, null, reason);
         } else {
             return getVariation(flag, offVariation, reason);
         }
@@ -192,7 +219,7 @@ public class Evaluator {
     }
 
     private Boolean clauseMatchesUser(DataModel.Clause clause, LDUser user) {
-        if (clause.getOperator().equals('SEGMENT_MATCH')) {
+        if (clause.getOperator().equals('segmentMatch')) {
             for (LDValue j : clause.getValues()) {
                 if (j.getType() == LDValueType.CString) {
                     DataModel.Segment segment = this.store.getSegment(j.stringValue());
@@ -212,7 +239,7 @@ public class Evaluator {
     }
 
     private Boolean clauseMatchesUserNoSegments(DataModel.Clause clause, LDUser user) {
-        LDValue userValue = null;
+        LDValue userValue = user.getAttribute(clause.getAttribute());
 
         if (userValue == null) {
             return false;

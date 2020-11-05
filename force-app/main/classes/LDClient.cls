@@ -9,7 +9,7 @@ public class LDClient {
         private Integer          variationIndex;
         private EvaluationReason reason;
 
-        EvaluationDetail() {
+        public EvaluationDetail() {
             this.variationIndex = null;
             this.reason         = null;
         }
@@ -32,13 +32,13 @@ public class LDClient {
     }
 
     public Boolean boolVariation(LDUser user, String key, Boolean fallback) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true, false);
 
         return result.getValue().booleanValue();
     }
 
     public Boolean boolVariation(LDUser user, String key, Boolean fallback, EvaluationDetail details) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true, true);
 
         details.variationIndex = result.getVariationIndex();
         details.reason         = result.getReason();
@@ -47,13 +47,13 @@ public class LDClient {
     }
 
     public Integer intVariation(LDUser user, String key, Integer fallback) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true, false);
 
         return result.getValue().intValue();
     }
 
     public Integer intVariation(LDUser user, String key, Integer fallback, EvaluationDetail details) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true, true);
 
         details.variationIndex = result.getVariationIndex();
         details.reason         = result.getReason();
@@ -62,13 +62,13 @@ public class LDClient {
     }
 
     public Double doubleVariation(LDUser user, String key, Double fallback) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true, false);
 
         return result.getValue().doubleValue();
     }
 
     public Double doubleVariation(LDUser user, String key, Double fallback, EvaluationDetail details) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true, true);
 
         details.variationIndex = result.getVariationIndex();
         details.reason         = result.getReason();
@@ -77,13 +77,13 @@ public class LDClient {
     }
 
     public String stringVariation(LDUser user, String key, String fallback) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true, false);
 
         return result.getValue().stringValue();
     }
 
     public String stringVariation(LDUser user, String key, String fallback, EvaluationDetail details) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true, true);
 
         details.variationIndex = result.getVariationIndex();
         details.reason         = result.getReason();
@@ -92,13 +92,13 @@ public class LDClient {
     }
 
     public LDValue jsonVariation(LDUser user, String key, LDValue fallback) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, fallback, true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, fallback, true, false);
 
         return result.getValue();
     }
 
     public LDValue jsonVariation(LDUser user, String key, LDValue fallback, EvaluationDetail details) {
-        Evaluator.EvalResult result = this.evaluateInternal(key, user, fallback, true);
+        Evaluator.EvalResult result = this.evaluateInternal(key, user, fallback, true, true);
 
         details.variationIndex = result.getVariationIndex();
         details.reason         = result.getReason();
@@ -117,16 +117,20 @@ public class LDClient {
 
         for (String flagKey : flags.keySet()) {
             DataModel.Flag flag = flags.get(flagKey);
+            
+            Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user, false);
 
+            if (evalResult.getValue() != null) {
+                result.put(flagKey, evalResult.getValue());
+            }
+
+            /*
             try {
-                Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user);
 
-                if (evalResult.getValue() != null) {
-                    result.put(flagKey, evalResult.getValue());
-                }
             } catch (Exception err) {
                 // required by compiler
             }
+            */
         }
 
         return result;
@@ -137,7 +141,7 @@ public class LDClient {
             return;
         }
 
-        this.eventSink.sinkIdentify(new Event.Identify(user, this.getTime.now()));
+        this.eventSink.sinkIdentify(new Event.Identify(user, this.getTime.now(), config.getAllAttributesPrivate()));
     }
 
     public void track(LDUser user, String key, Double optionalMetric, LDValue optionalValue) {
@@ -145,15 +149,25 @@ public class LDClient {
             return;
         }
 
-        this.eventSink.sinkCustom(new Event.Custom(user, key, optionalMetric, optionalValue, this.getTime.now()));
+        this.eventSink.sinkCustom(new Event.Custom(user, key, optionalMetric, optionalValue, this.getTime.now(), config.getAllAttributesPrivate()));
     }
 
-    private Evaluator.EvalResult evaluateInternal(String featureKey, LDUser user, LDValue defaultValue, Boolean checkType) {
-        try {
-            DataModel.Flag flag = this.store.getFlag(featureKey);
+    private Evaluator.EvalResult evaluateInternal(
+        String  featureKey,
+        LDUser  user,
+        LDValue defaultValue,
+        Boolean checkType,
+        Boolean includeReasonInEvents
+    ) {
+        DataModel.Flag flag = this.store.getFlag(featureKey);
 
+        // try {
             if (flag == null) {
-                EvaluationReason reason = EvaluationReason.error(EvaluationReason.ErrorKind.FLAG_NOT_FOUND);
+                EvaluationReason reason;
+                
+                if (includeReasonInEvents) {
+                    reason = EvaluationReason.error(EvaluationReason.ErrorKind.FLAG_NOT_FOUND);
+                }
 
                 Event.Feature event = new Event.Feature(
                     featureKey, // key
@@ -168,16 +182,21 @@ public class LDClient {
                     null, // debugEventsUntilDate
                     false, // debug
                     true, // unknown
-                    this.getTime.now() // now
+                    this.getTime.now(), // now
+                    config.getAllAttributesPrivate() // allAttributesPrivate
                 );
 
                 this.eventSink.sinkFeature(event);
 
-                return new Evaluator.EvalResult(defaultValue, -1, reason);
+                return new Evaluator.EvalResult(defaultValue, null, reason);
             }
 
             if (user == NULL || user.getKey() == NULL) {
-                EvaluationReason reason = EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED);
+                EvaluationReason reason;
+
+                if (includeReasonInEvents) {
+                    reason = EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED);
+                }
 
                 Event.Feature event = new Event.Feature(
                     featureKey, // key
@@ -192,48 +211,58 @@ public class LDClient {
                     null, // debugEventsUntilDate
                     false, // debug
                     false, // unknown
-                    this.getTime.now() // now
+                    this.getTime.now(), // now
+                    config.getAllAttributesPrivate() // allAttributesPrivate
                 );
 
                 this.eventSink.sinkFeature(event);
 
-                return new Evaluator.EvalResult(defaultValue, -1, reason);
+                return new Evaluator.EvalResult(defaultValue, null, reason);
             }
 
-            Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user);
+            Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user, includeReasonInEvents);
 
             if (evalResult.getValue() == null) {
-                return new Evaluator.EvalResult(defaultValue, -1, evalResult.getReason());
-            } else {
-                Boolean requireExperimentData =
-                    this.evaluator.isExperiment(flag, evalResult.getReason());
-
-                Event.Feature event = new Event.Feature(
-                    featureKey, // key
-                    user, // user
-                    flag.getVersion(), // version
-                    evalResult.getVariationIndex(), // variation
-                    evalResult.getValue(), // value
-                    defaultValue, // defaultValue
-                    evalResult.getReason(), // reason
-                    null, // prereqOf
-                    requireExperimentData || flag.getTrackEvents(), // trackEvents
-                    flag.getDebugEventsUntilDate(), // debugEventsUntilDate
-                    false, // debug
-                    false, // unknown
-                    this.getTime.now() // now
-                );
-
-                this.eventSink.sinkFeature(event);
-
-                for (Event.Feature prereqEvent : evalResult.getPrerequisiteEvents()) {
-                    this.eventSink.sinkFeature(prereqEvent);
-                }
-
-                return evalResult;
+                evalResult = new Evaluator.EvalResult(defaultValue, null, evalResult.getReason());
             }
+
+            Boolean requireExperimentData =
+                this.evaluator.isExperiment(flag, evalResult.getReason());
+
+            EvaluationReason reason;
+
+            if (includeReasonInEvents || this.evaluator.shouldForceReason(flag, evalResult.getReason())) {
+                reason = evalResult.getReason();
+            }
+
+            Event.Feature event = new Event.Feature(
+                featureKey, // key
+                user, // user
+                flag.getVersion(), // version
+                evalResult.getVariationIndex(), // variation
+                evalResult.getValue(), // value
+                defaultValue, // defaultValue
+                reason, // reason
+                null, // prereqOf
+                requireExperimentData || flag.getTrackEvents(), // trackEvents
+                flag.getDebugEventsUntilDate(), // debugEventsUntilDate
+                false, // debug
+                false, // unknown
+                this.getTime.now(), // now
+                config.getAllAttributesPrivate() // allAttributesPrivate
+            );
+
+            this.eventSink.sinkFeature(event);
+
+            for (Event.Feature prereqEvent : evalResult.getPrerequisiteEvents()) {
+                this.eventSink.sinkFeature(prereqEvent);
+            }
+
+            return evalResult;
+        /*
         } catch (Exception err) {
-            return new Evaluator.EvalResult(defaultValue, -1, EvaluationReason.error(EvaluationReason.ErrorKind.EXCEPTION_THROWN));
+            return new Evaluator.EvalResult(defaultValue, null, EvaluationReason.error(EvaluationReason.ErrorKind.EXCEPTION_THROWN));
         }
+        */
     }
 }

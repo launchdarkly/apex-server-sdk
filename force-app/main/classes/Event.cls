@@ -1,13 +1,16 @@
 public class Event {
     public class Identify {
-        private final LDUser user;
+        private final String key;
+        private final Object user;
         private final Long   now;
 
-        public Identify(LDUser user, Long now) {
+        public Identify(LDUser user, Long now, Boolean allAttributesPrivate) {
             System.assertNotEquals(user, null);
             System.assertNotEquals(now, null);
+            System.assertNotEquals(allAttributesPrivate, null);
 
-            this.user = user;
+            this.key  = user.getKey();
+            this.user = user.toGeneric(allAttributesPrivate);
             this.now  = now;
         }
 
@@ -15,8 +18,8 @@ public class Event {
             Map<String, Object> event = new Map<String, Object>();
 
             event.put('kind', 'identify');
-            event.put('key', this.user.getKey());
-            event.put('user', this.user.toGeneric());
+            event.put('key', this.key);
+            event.put('user', this.user);
             event.put('creationDate', this.now);
 
             return (Object)event;
@@ -24,7 +27,7 @@ public class Event {
     }
 
     public class Custom {
-        private final LDUser  user;
+        private final Object  user;
         private final String  key;
         private final Double  optionalMetric;
         private final LDValue optionalValue;
@@ -35,13 +38,15 @@ public class Event {
             String  key,
             Double  optionalMetric,
             LDValue optionalValue,
-            Long    now
+            Long    now,
+            Boolean allAttributesPrivate
         ) {
             System.assertNotEquals(user, null);
             System.assertNotEquals(key, null);
             System.assertNotEquals(now, null);
+            System.assertNotEquals(allAttributesPrivate, null);
 
-            this.user           = user;
+            this.user           = user.toGeneric(allAttributesPrivate);
             this.key            = key;
             this.optionalMetric = optionalMetric;
             this.optionalValue  = optionalValue;
@@ -53,7 +58,7 @@ public class Event {
 
             event.put('kind', 'custom');
             event.put('key', key);
-            event.put('user', this.user.toGeneric());
+            event.put('user', this.user);
 
             if (this.optionalMetric != null) {
                 event.put('metricValue', this.optionalMetric);
@@ -97,25 +102,31 @@ public class Event {
             Double           debugEventsUntilDate,
             Boolean          debug,
             Boolean          unknown,
-            Long             now
+            Long             now,
+            Boolean          allAttributesPrivate
         ) {
             System.assertNotEquals(key, null);
-            System.assertNotEquals(value, null);
             System.assertNotEquals(trackEvents, null);
             System.assertNotEquals(debug, null);
             System.assertNotEquals(now, null);
 
             this.key                  = key;
-            this.user                 = user.toGeneric();
             this.version              = version;
             this.variation            = variation;
-            this.value                = value.toGeneric();
             this.prereqOf             = prereqOf;
             this.trackEvents          = trackEvents;
             this.debugEventsUntilDate = debugEventsUntilDate;
             this.debug                = debug;
             this.unknown              = unknown;
             this.now                  = now;
+            
+            if (user != null) {
+                this.user = user.toGeneric(allAttributesPrivate);
+            }
+            
+            if (value != null) {
+                this.value = value.toGeneric();
+            }
 
             if (defaultValue != null) {
                 this.defaultValue = defaultValue.toGeneric();
@@ -136,7 +147,7 @@ public class Event {
             this.version              = (Integer)obj.get('version');
             this.variation            = (Integer)obj.get('variation');
             this.value                = (Object)obj.get('value');
-            this.defaultValue         = (Object)obj.get('defaultValue');
+            this.defaultValue         = (Object)obj.get('default');
             this.prereqOf             = (String)obj.get('prereqOf');
             this.trackEvents          = (Boolean)obj.get('trackEvents');
             this.debugEventsUntilDate = (Double)obj.get('debugEventsUntilDate');
@@ -155,7 +166,7 @@ public class Event {
             event.put('version', this.version);
             event.put('variation', this.variation);
             event.put('value', this.value);
-            event.put('defaultValue', this.defaultValue);
+            event.put('default', this.defaultValue);
             
             if (this.prereqOf != null) {
                 event.put('prereqOf', this.prereqOf);

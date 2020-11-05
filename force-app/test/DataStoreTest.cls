@@ -1,21 +1,24 @@
 @isTest
 private class DataStoreTest {
+    private static final String flag1 =
+        '{' +
+            '"version": 52,' +
+            '"key": "hello"' +
+        '}';
+
+    private static final String segment1 =
+        '{' +
+            '"version": 50,' +
+            '"key": "hello"' +
+        '}';
+
     private static final String payload1 =
-        '{"flags":' +
-            '{' +
-                '"hello": ' +
-                '{' +
-                    '"version": 52, ' +
-                    '"key": "hello", ' +
-                    '"on": false, ' +
-                    '"offVariation": 0, ' +
-                    '"salt": "abc123", ' +
-                    '"fallthrough": ' +
-                    '{' +
-                        '"variation": 0' +
-                    '},' +
-                    '"variations": [true]' +
-                '}' +
+        '{' +
+            '"flags": {' +
+                '"hello": ' + flag1 +
+            '},' +
+            '"segments": {' +
+                '"hello": ' + segment1 +
             '}' +
         '}';
 
@@ -28,9 +31,18 @@ private class DataStoreTest {
 
     @isTest static void putAllBasic() {
         DataStore store = new DataStore();
+
         store.putAll((Map<String, Object>)JSON.deserializeUntyped(DataStoreTest.payload1));
 
-        System.assertNotEquals(store.getFlag('hello'), null);
+        System.assertEquals(
+            store.getVersioned('hello', 'flags').Raw__c,
+            JSON.serialize(JSON.deserializeUntyped(flag1))
+        );
+
+        System.assertEquals(
+            store.getVersioned('hello', 'segments').Raw__c,
+            JSON.serialize(JSON.deserializeUntyped(segment1))
+        );
     }
 
     @isTest static void putAllReplaces() {

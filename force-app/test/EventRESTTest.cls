@@ -3,7 +3,7 @@ private class EventRESTTest {
     @isTest static void basicBundle() {
         EventSink sink = new EventSink();
         
-        sink.sinkIdentify(new Event.Identify(new LDUser.Builder('abc').build(), 0));
+        sink.sinkIdentify(new Event.Identify(new LDUser.Builder('abc').build(), 0, false));
         
         Object bundle = EventREST.prepareEvents();
         

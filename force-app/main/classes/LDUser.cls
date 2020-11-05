@@ -4,6 +4,7 @@ public class LDUser {
     private final String        ip;
     private final String        firstName;
     private final String        lastName;
+    private final String        email;
     private final String        name;
     private final String        avatar;
     private final String        country;
@@ -17,6 +18,7 @@ public class LDUser {
         String        ip,
         String        firstName,
         String        lastName,
+        String        email,
         String        name,
         String        avatar,
         String        country,
@@ -29,6 +31,7 @@ public class LDUser {
         this.ip                    = ip;
         this.firstName             = firstName;
         this.lastName              = lastName;
+        this.email                 = email;
         this.name                  = name;
         this.avatar                = avatar;
         this.country               = country;
@@ -55,6 +58,10 @@ public class LDUser {
 
     public String getLastName() {
         return this.lastName;
+    }
+
+    public String getEmail() {
+        return this.email;
     }
 
     public String getName() {
@@ -94,6 +101,9 @@ public class LDUser {
             when 'lastName' {
                 return LDValue.of(this.lastName);
             }
+            when 'email' {
+                return LDValue.of(this.email);
+            }
             when 'name' {
                 return LDValue.of(this.name);
             }
@@ -118,11 +128,12 @@ public class LDUser {
 
     private void addField(
         Map<String, Object> result,
+        Boolean             allAttributesPrivate,
         List<String>        redacted,
         String              key,
         Object              value
     ) {
-        if (this.privateAttributeNames != null && this.privateAttributeNames.contains(key)) {
+        if (allAttributesPrivate || (this.privateAttributeNames != null && this.privateAttributeNames.contains(key))) {
             if (value != null) {
                 redacted.add(key);
             }
@@ -133,7 +144,7 @@ public class LDUser {
         }
     }
 
-    public Object toGeneric() {
+    public Object toGeneric(Boolean allAttributesPrivate) {
         List<String> redacted = new List<String>();
 
         Map<String, Object> result = new Map<String, Object>();
@@ -144,13 +155,14 @@ public class LDUser {
             result.put('anonymous', this.anonymous);
         }
 
-        this.addField(result, redacted, 'ip',        this.ip);
-        this.addField(result, redacted, 'firstName', this.firstName);
-        this.addField(result, redacted, 'lastName',  this.lastName);
-        this.addField(result, redacted, 'name',      this.name);
-        this.addField(result, redacted, 'avatar',    this.avatar);
-        this.addField(result, redacted, 'country',   this.country);
-        this.addField(result, redacted, 'secondary', this.secondary);
+        this.addField(result, allAttributesPrivate, redacted, 'ip',        this.ip);
+        this.addField(result, allAttributesPrivate, redacted, 'firstName', this.firstName);
+        this.addField(result, allAttributesPrivate, redacted, 'lastName',  this.lastName);
+        this.addField(result, allAttributesPrivate, redacted, 'email',     this.email);
+        this.addField(result, allAttributesPrivate, redacted, 'name',      this.name);
+        this.addField(result, allAttributesPrivate, redacted, 'avatar',    this.avatar);
+        this.addField(result, allAttributesPrivate, redacted, 'country',   this.country);
+        this.addField(result, allAttributesPrivate, redacted, 'secondary', this.secondary);
 
         if (this.custom != null) {
             Map<String, Object> filtered = new Map<String, Object>();
@@ -158,7 +170,7 @@ public class LDUser {
             Map<String, Object> customMap = (Map<String, Object>)this.custom.toGeneric();
 
             for (String key : customMap.keySet()) {
-                this.addField(filtered, redacted, key, customMap.get(key));
+                this.addField(filtered, allAttributesPrivate, redacted, key, customMap.get(key));
             }
 
             if (filtered.size() != 0) {
@@ -179,6 +191,7 @@ public class LDUser {
         private String        ip;
         private String        firstName;
         private String        lastName;
+        private String        email;
         private String        name;
         private String        avatar;
         private String        country;
@@ -217,6 +230,12 @@ public class LDUser {
 
         public Builder setLastName(String lastName) {
             this.lastName = lastName;
+
+            return this;
+        }
+        
+        public Builder setEmail(String email) {
+            this.email = email;
 
             return this;
         }
@@ -264,6 +283,7 @@ public class LDUser {
                 this.ip,
                 this.firstName,
                 this.lastName,
+                this.email,
                 this.name,
                 this.avatar,
                 this.country,

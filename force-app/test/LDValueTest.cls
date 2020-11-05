@@ -9,6 +9,7 @@ private class LDValueTest {
         System.assertEquals(value.equals(LDValue.of(true)), true);
         System.assertEquals(value.equals(LDValue.of(false)), false);
         System.assertEquals(value.equals(LDValue.of('hello')), false);
+        System.assertEquals(value.equals(LDValue.ofGeneric(x)), true);
     }
 
     @isTest static void basicDouble() {
@@ -42,6 +43,7 @@ private class LDValueTest {
         System.assertEquals(value.equals(LDValue.of('hello')), true);
         System.assertEquals(value.equals(LDValue.of('other')), false);
         System.assertEquals(value.equals(LDValue.of(52)), false);
+        System.assertEquals(value.equals(LDValue.ofGeneric(x)), true);
     }
 
     @isTest static void basicObject() {
@@ -58,6 +60,7 @@ private class LDValueTest {
         System.assertEquals(value.equals(new LDValueObject.Builder().set('a', LDValue.of(true)).build()), true);
         System.assertEquals(value.equals(new LDValueObject.Builder().set('b', LDValue.of(true)).build()), false);
         System.assertEquals(value.equals(LDValue.of(52)), false);
+        System.assertEquals(value.equals(LDValue.ofGeneric(expectedGeneric)), true);
     }
 
     @isTest static void basicArray() {
@@ -74,5 +77,6 @@ private class LDValueTest {
         System.assertEquals(value.equals(new LDValueArray.Builder().add(LDValue.of(true)).build()), true);
         System.assertEquals(value.equals(new LDValueArray.Builder().add(LDValue.of(false)).build()), false);
         System.assertEquals(value.equals(LDValue.of(52)), false);
+        System.assertEquals(value.equals(LDValue.ofGeneric(expectedGeneric)), true);
     }
 }

@@ -23,7 +23,8 @@ private class EventProcessorTest {
             null, // debugEventsUntilDate
             false, // debug
             false, // unknown
-            1 // now
+            1, // now
+            false // allAttributesPrivate
         );
 
         Event.Feature event2 = new Event.Feature(
@@ -39,7 +40,8 @@ private class EventProcessorTest {
             null, // debugEventsUntilDate
             false, // debug
             false, // unknown
-            2 // now
+            2, // now
+            false // allAttributesPrivate
         );
 
         Event.Feature event3 = new Event.Feature(
@@ -55,7 +57,8 @@ private class EventProcessorTest {
             null, // debugEventsUntilDate
             false, // debug
             false, // unknown
-            3 // now
+            3, // now
+            false // allAttributesPrivate
         );
 
         Event.Feature event4 = new Event.Feature(
@@ -71,7 +74,8 @@ private class EventProcessorTest {
             null, // debugEventsUntilDate
             false, // debug
             false, // unknown
-            4 // now
+            4, // now
+            false // allAttributesPrivate
         );
 
         Event.Feature event5 = new Event.Feature(
@@ -87,7 +91,8 @@ private class EventProcessorTest {
             null, // debugEventsUntilDate
             false, // debug
             true, // unknown
-            5 // now
+            5, // now
+            false // allAttributesPrivate
         );
 
         EventProcessor processor = new EventProcessor(new GetTimeMock());
@@ -146,7 +151,10 @@ private class EventProcessorTest {
             '"endDate": 2' +
         '}';
 
-        System.assertEquals(summaryEvent, JSON.deserializeUntyped(expectedRaw));
+        System.assertEquals(
+            JSON.deserializeUntyped(JSON.serialize(summaryEvent)),
+            JSON.deserializeUntyped(expectedRaw)
+        );
     }
 
     @isTest static void processFeatureEvent() {
@@ -166,7 +174,8 @@ private class EventProcessorTest {
             null, // debugEventsUntilDate
             false, // debug
             false, // unknown
-            6 // now
+            6, // now
+            false // allAttributesPrivate
         );
 
         EventProcessor processor = new EventProcessor(new GetTimeMock());
@@ -213,7 +222,8 @@ private class EventProcessorTest {
             null, // debugEventsUntilDate
             false, // debug
             false, // unknown
-            1 // now
+            1, // now
+            false // allAttributesPrivate
         );
         
         processor.summarizeFeatureEvent(event1);
@@ -239,7 +249,10 @@ private class EventProcessorTest {
         
         Object bundle = processor.buildEventBundle();
 
-        System.assertEquals(bundle, JSON.deserializeUntyped(expectedRaw));
+        System.assertEquals(
+            JSON.deserializeUntyped(JSON.serialize(bundle)),
+            JSON.deserializeUntyped(expectedRaw)
+        );
     }
     
     @isTest static void trackFeatureEventIncluded() {
@@ -258,7 +271,8 @@ private class EventProcessorTest {
             null, // debugEventsUntilDate
             false, // debug
             false, // unknown
-            1 // now
+            1, // now
+            false // allAttributesPrivate
         );
         
         processor.processFeatureEvent(event1);
@@ -268,10 +282,7 @@ private class EventProcessorTest {
                 '"kind": "feature",' +
                 '"key": "key1",' +
                 '"creationDate": 1,' +
-                '"debug": false,' +
-                '"defaultValue": "default1",' +
-                '"trackEvents": true,' +
-                '"unknown": false,' +
+                '"default": "default1",' +
                 '"value": "value1",' +
                 '"variation": 1,' +
                 '"version": 11,' +

@@ -45,7 +45,7 @@ public class EvaluationReason {
 
     private EvaluationReason(Kind kind) {
         this.kind            = kind;
-        this.ruleIndex       = -1;
+        this.ruleIndex       = null;
         this.ruleId          = null;
         this.prerequisiteKey = null;
         this.errorKind       = null;
@@ -53,7 +53,7 @@ public class EvaluationReason {
 
     private EvaluationReason(ErrorKind errorKind) {
         this.kind            = EvaluationReason.Kind.ERROR;
-        this.ruleIndex       = -1;
+        this.ruleIndex       = null;
         this.ruleId          = null;
         this.prerequisiteKey = null;
         this.errorKind       = errorKind;
@@ -76,7 +76,7 @@ public class EvaluationReason {
     }
 
     public static EvaluationReason prerequisiteFailed(String prerequisiteKey) {
-        return new EvaluationReason(Kind.PREREQUISITE_FAILED, -1, null, prerequisiteKey, null);
+        return new EvaluationReason(Kind.PREREQUISITE_FAILED, null, null, prerequisiteKey, null);
     }
 
     public static EvaluationReason ruleMatch(Integer ruleIndex, String ruleId) {

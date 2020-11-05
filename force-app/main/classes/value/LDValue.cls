@@ -26,8 +26,40 @@ public abstract class LDValue {
             return null;
         } else if (value instanceof Boolean) {
             return LDValueBool.fromBoolean((Boolean)value);
+        } else if (value instanceof Integer) {
+            return LDValueNumber.fromInteger((Integer)value);
+        } else if (value instanceof Double) {
+            return LDValueNumber.fromDouble((Double)value);
+        } else if (value instanceof Decimal) {
+            return LDValueNumber.fromDecimal((Decimal)value);
         } else if (value instanceof String) {
             return LDValueString.fromString((String)value);
+        } else if (value instanceof List<Object>) {
+            List<Object> valueConcrete = (List<Object>)value;
+
+            LDValueArray.Builder builder = new LDValueArray.Builder();
+
+            for (Object item : valueConcrete) {
+                if (item != null) {
+                    builder.add(ofGeneric(item));
+                }
+            }
+
+            return builder.build();
+        } else if (value instanceof Map<String, Object>) {
+            Map<String, Object> valueConcrete = (Map<String, Object>)value;
+
+            LDValueObject.Builder builder = new LDValueObject.Builder();
+
+            for (String key : valueConcrete.keySet()) {
+                Object item = valueConcrete.get(key);
+
+                if (item != null) {
+                    builder.set(key, ofGeneric(item));
+                }
+            }
+
+            return builder.build();
         }
 
         return null;

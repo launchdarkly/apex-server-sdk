@@ -33,7 +33,7 @@ private class EvaluatorTest {
 
         LDUser user = new LDUser.Builder('abc').build();
 
-        Evaluator.EvalResult result = evaluator.evaluate(flag, user);
+        Evaluator.EvalResult result = evaluator.evaluate(flag, user, false);
 
         System.assertEquals(result.getValue().booleanValue(), true);
         System.assertEquals(result.getVariationIndex(), 0);
@@ -52,7 +52,7 @@ private class EvaluatorTest {
 
         LDUser user = new LDUser.Builder('abc').build();
 
-        Evaluator.EvalResult result = evaluator.evaluate(flag, user);
+        Evaluator.EvalResult result = evaluator.evaluate(flag, user, false);
 
         System.assertEquals(result.getValue().booleanValue(), true);
         System.assertEquals(result.getVariationIndex(), 0);
@@ -75,7 +75,7 @@ private class EvaluatorTest {
 
         LDUser user = new LDUser.Builder('abc').build();
 
-        Evaluator.EvalResult result = evaluator.evaluate(flag, user);
+        Evaluator.EvalResult result = evaluator.evaluate(flag, user, false);
 
         System.assertEquals(result.getValue().booleanValue(), true);
         System.assertEquals(result.getVariationIndex(), 0);
@@ -98,7 +98,7 @@ private class EvaluatorTest {
 
         LDUser user = new LDUser.Builder('abc').build();
 
-        Evaluator.EvalResult result = evaluator.evaluate(flag, user);
+        Evaluator.EvalResult result = evaluator.evaluate(flag, user, false);
 
         System.assertEquals(result.getValue().booleanValue(), true);
         System.assertEquals(result.getVariationIndex(), 0);
@@ -126,7 +126,7 @@ private class EvaluatorTest {
 
         LDUser user = new LDUser.Builder('abc').build();
 
-        Evaluator.EvalResult result = evaluator.evaluate(flag, user);
+        Evaluator.EvalResult result = evaluator.evaluate(flag, user, false);
 
         System.assertEquals(result.getValue().booleanValue(), true);
         System.assertEquals(result.getVariationIndex(), 0);
@@ -155,7 +155,7 @@ private class EvaluatorTest {
 
         LDUser user = new LDUser.Builder('abc').build();
 
-        Evaluator.EvalResult result = evaluator.evaluate(flag, user);
+        Evaluator.EvalResult result = evaluator.evaluate(flag, user, false);
 
         System.assertEquals(result.getValue().booleanValue(), true);
         System.assertEquals(result.getVariationIndex(), 0);
@@ -165,33 +165,69 @@ private class EvaluatorTest {
     @isTest static void segmentIncludedUser() {
         DataStoreMock store = new DataStoreMock();
 
-        DataModel.Clause clause = new DataModel.Clause('key', 'SEGMENT_MATCH');
-        clause.values.add(LDValue.of('segment'));
+        DataModel.Clause clause = new DataModel.Clause('key', 'segmentMatch');
+        clause.values.add(LDValue.of('segment-a'));
 
         DataModel.Rule rule = new DataModel.Rule('rule');
         rule.clauses.add(clause);
-        rule.vor.variation = 0;
+        rule.vor.variation = 2;
 
         DataModel.Flag flag = new DataModel.Flag();
         flag.fieldOn = true;
-        flag.variations.add(LDValue.of(true));
+        flag.variations.add(LDValue.of('bad'));
+        flag.variations.add(LDValue.of('fallthrough'));
+        flag.variations.add(LDValue.of('expected'));
         flag.rules.add(rule);
-        flag.fallthrough.variation = 0;
+        flag.fallthrough.variation = 1;
 
-        DataModel.Segment segment = new DataModel.Segment('segment');
+        DataModel.Segment segment = new DataModel.Segment('segment-a');
         segment.included.add('abc');
 
-        store.segments.put('segment', segment);
+        store.segments.put('segment-a', segment);
 
         Evaluator evaluator = new Evaluator(store, new GetTimeMock());
 
         LDUser user = new LDUser.Builder('abc').build();
 
-        Evaluator.EvalResult result = evaluator.evaluate(flag, user);
+        Evaluator.EvalResult result = evaluator.evaluate(flag, user, false);
 
-        System.assertEquals(result.getValue().booleanValue(), true);
-        System.assertEquals(result.getVariationIndex(), 0);
+        System.assertEquals(result.getValue().equals(LDValue.of('expected')), true);
+        System.assertEquals(result.getVariationIndex(), 2);
         System.assertEquals(result.getReason().getKind(), EvaluationReason.Kind.RULE_MATCH);
+    }
+    
+    @isTest static void segmentExcludedUser() {
+        DataStoreMock store = new DataStoreMock();
+
+        DataModel.Clause clause = new DataModel.Clause('key', 'segmentMatch');
+        clause.values.add(LDValue.of('segment-a'));
+
+        DataModel.Rule rule = new DataModel.Rule('rule');
+        rule.clauses.add(clause);
+        rule.vor.variation = 2;
+
+        DataModel.Flag flag = new DataModel.Flag();
+        flag.fieldOn = true;
+        flag.variations.add(LDValue.of('bad'));
+        flag.variations.add(LDValue.of('fallthrough'));
+        flag.variations.add(LDValue.of('unexpected'));
+        flag.rules.add(rule);
+        flag.fallthrough.variation = 1;
+
+        DataModel.Segment segment = new DataModel.Segment('segment-a');
+        segment.excluded.add('abc');
+
+        store.segments.put('segment-a', segment);
+
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
+
+        LDUser user = new LDUser.Builder('abc').build();
+
+        Evaluator.EvalResult result = evaluator.evaluate(flag, user, false);
+
+        System.assertEquals(result.getValue().equals(LDValue.of('fallthrough')), true);
+        System.assertEquals(result.getVariationIndex(), 1);
+        System.assertEquals(result.getReason().getKind(), EvaluationReason.Kind.FALLTHROUGH);
     }
     
     @isTest static void bucketUser() {

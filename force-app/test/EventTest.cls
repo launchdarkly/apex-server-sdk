@@ -3,7 +3,7 @@ private class EventTest {
     @isTest static void identify() {
         LDUser user = new LDUser.Builder('1').build();
 
-        Event.Identify event = new Event.Identify(user, 123);
+        Event.Identify event = new Event.Identify(user, 123, false);
 
         String result = JSON.serialize(event.toGeneric());
 

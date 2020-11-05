@@ -97,9 +97,15 @@ public class EventProcessor {
 
     public void processFeatureEvent(Event.Feature event) {
         this.summarizeFeatureEvent(event);
-        
+
         if (event.getTrackEvents()) {
-            this.events.add(event.toGeneric());
+            Map<String, Object> eventGeneric = (Map<String, Object>)event.toGeneric();
+
+            eventGeneric.remove('trackEvents');
+            eventGeneric.remove('unknown');
+            eventGeneric.remove('debug');
+
+            this.events.add((Object)eventGeneric);
         }
     }
     
@@ -120,8 +126,8 @@ public class EventProcessor {
 
         event.put('features', outFlagContexts);
         
-        event.put('startDate', (Integer)this.summaryStartTime);
-        event.put('endDate', (Integer)this.getTime.now());
+        event.put('startDate', this.summaryStartTime);
+        event.put('endDate', this.getTime.now());
 
         for (String flagKey : this.flagContexts.keySet()) {
             FlagContext flagContext = this.flagContexts.get(flagKey);
