@@ -23,7 +23,7 @@ private class LDClientTest {
         DataStore store = new DataStore();
         store.putAll((Map<String, Object>)JSON.deserializeUntyped(raw));
 
-        LDConfig config = new LDConfig.Builder('sdk-xyz').build();
+        LDConfig config = new LDConfig.Builder().build();
         LDUser   user   = new LDUser.Builder('user-key').build();
         LDClient client = new LDClient(config);
 
@@ -35,7 +35,7 @@ private class LDClientTest {
     }
 
     @isTest static void allFlagsEmptyStore() {
-        LDConfig config = new LDConfig.Builder('sdk-xyz').build();
+        LDConfig config = new LDConfig.Builder().build();
         LDUser   user   = new LDUser.Builder('user-key').build();
         LDClient client = new LDClient(config);
 
@@ -44,7 +44,7 @@ private class LDClientTest {
     }
 
     @isTest static void identify() {
-        LDConfig config = new LDConfig.Builder('sdk-xyz').build();
+        LDConfig config = new LDConfig.Builder().build();
         LDUser   user   = new LDUser.Builder('user-key').build();
         LDClient client = new LDClient(config);
 
@@ -62,7 +62,7 @@ private class LDClientTest {
     }
 
     @isTest static void trackMinimal() {
-        LDConfig config = new LDConfig.Builder('sdk-xyz').build();
+        LDConfig config = new LDConfig.Builder().build();
         LDUser   user   = new LDUser.Builder('user-key').build();
         LDClient client = new LDClient(config);
         
@@ -80,7 +80,7 @@ private class LDClientTest {
     }
 
     @isTest static void trackFull() {
-        LDConfig config = new LDConfig.Builder('sdk-xyz').build();
+        LDConfig config = new LDConfig.Builder().build();
         LDUser   user   = new LDUser.Builder('user-key').build();
         LDClient client = new LDClient(config);
         LDValue  value  = new LDValueObject.Builder().set('a', LDValue.of(true)).build();

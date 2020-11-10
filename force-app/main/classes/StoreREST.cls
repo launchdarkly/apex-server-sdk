@@ -2,7 +2,7 @@
 global with sharing class StoreREST {
     @HttpGet
     global static String doGet() {
-        LDConfig config = new LDConfig.Builder('sdk-xyz').build();
+        LDConfig config = new LDConfig.Builder().build();
         LDUser   user   = new LDUser.Builder('user-key').build();
         LDClient client = new LDClient(config);
 

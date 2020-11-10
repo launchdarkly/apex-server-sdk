@@ -24,7 +24,12 @@ public class LDClient {
     }
 
     public LDClient(LDConfig config) {
-        this.config    = config;
+        if (config == null) {
+            this.config = new LDConfig.Builder().build();
+        } else {
+            this.config = config;
+        }
+
         this.store     = new DataStore();
         this.eventSink = new EventSink();
         this.getTime   = new GetTimeImpl();
@@ -123,14 +128,6 @@ public class LDClient {
             if (evalResult.getValue() != null) {
                 result.put(flagKey, evalResult.getValue());
             }
-
-            /*
-            try {
-
-            } catch (Exception err) {
-                // required by compiler
-            }
-            */
         }
 
         return result;
@@ -161,91 +158,53 @@ public class LDClient {
     ) {
         DataModel.Flag flag = this.store.getFlag(featureKey);
 
-        // try {
-            if (flag == null) {
-                EvaluationReason reason;
-                
-                if (includeReasonInEvents) {
-                    reason = EvaluationReason.error(EvaluationReason.ErrorKind.FLAG_NOT_FOUND);
-                }
-
-                Event.Feature event = new Event.Feature(
-                    featureKey, // key
-                    user, // user
-                    null, // version
-                    null, // variation
-                    defaultValue, // value
-                    defaultValue, // defaultValue
-                    reason, // reason
-                    null, // prereqOf
-                    false, // trackEvents
-                    null, // debugEventsUntilDate
-                    false, // debug
-                    true, // unknown
-                    this.getTime.now(), // now
-                    config.getAllAttributesPrivate() // allAttributesPrivate
-                );
-
-                this.eventSink.sinkFeature(event);
-
-                return new Evaluator.EvalResult(defaultValue, null, reason);
-            }
-
-            if (user == NULL || user.getKey() == NULL) {
-                EvaluationReason reason;
-
-                if (includeReasonInEvents) {
-                    reason = EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED);
-                }
-
-                Event.Feature event = new Event.Feature(
-                    featureKey, // key
-                    user, // user
-                    null, // version
-                    null, // variation
-                    defaultValue, // value
-                    defaultValue, // defaultValue
-                    reason, // reason
-                    null, // prereqOf
-                    false, // trackEvents
-                    null, // debugEventsUntilDate
-                    false, // debug
-                    false, // unknown
-                    this.getTime.now(), // now
-                    config.getAllAttributesPrivate() // allAttributesPrivate
-                );
-
-                this.eventSink.sinkFeature(event);
-
-                return new Evaluator.EvalResult(defaultValue, null, reason);
-            }
-
-            Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user, includeReasonInEvents);
-
-            if (evalResult.getValue() == null) {
-                evalResult = new Evaluator.EvalResult(defaultValue, null, evalResult.getReason());
-            }
-
-            Boolean requireExperimentData =
-                this.evaluator.isExperiment(flag, evalResult.getReason());
-
+        if (flag == null) {
             EvaluationReason reason;
-
-            if (includeReasonInEvents || this.evaluator.shouldForceReason(flag, evalResult.getReason())) {
-                reason = evalResult.getReason();
+            
+            if (includeReasonInEvents) {
+                reason = EvaluationReason.error(EvaluationReason.ErrorKind.FLAG_NOT_FOUND);
             }
 
             Event.Feature event = new Event.Feature(
                 featureKey, // key
                 user, // user
-                flag.getVersion(), // version
-                evalResult.getVariationIndex(), // variation
-                evalResult.getValue(), // value
+                null, // version
+                null, // variation
+                defaultValue, // value
                 defaultValue, // defaultValue
                 reason, // reason
                 null, // prereqOf
-                requireExperimentData || flag.getTrackEvents(), // trackEvents
-                flag.getDebugEventsUntilDate(), // debugEventsUntilDate
+                false, // trackEvents
+                null, // debugEventsUntilDate
+                false, // debug
+                true, // unknown
+                this.getTime.now(), // now
+                config.getAllAttributesPrivate() // allAttributesPrivate
+            );
+
+            this.eventSink.sinkFeature(event);
+
+            return new Evaluator.EvalResult(defaultValue, null, reason);
+        }
+
+        if (user == NULL || user.getKey() == NULL) {
+            EvaluationReason reason;
+
+            if (includeReasonInEvents) {
+                reason = EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED);
+            }
+
+            Event.Feature event = new Event.Feature(
+                featureKey, // key
+                user, // user
+                null, // version
+                null, // variation
+                defaultValue, // value
+                defaultValue, // defaultValue
+                reason, // reason
+                null, // prereqOf
+                false, // trackEvents
+                null, // debugEventsUntilDate
                 false, // debug
                 false, // unknown
                 this.getTime.now(), // now
@@ -254,15 +213,47 @@ public class LDClient {
 
             this.eventSink.sinkFeature(event);
 
-            for (Event.Feature prereqEvent : evalResult.getPrerequisiteEvents()) {
-                this.eventSink.sinkFeature(prereqEvent);
-            }
-
-            return evalResult;
-        /*
-        } catch (Exception err) {
-            return new Evaluator.EvalResult(defaultValue, null, EvaluationReason.error(EvaluationReason.ErrorKind.EXCEPTION_THROWN));
+            return new Evaluator.EvalResult(defaultValue, null, reason);
         }
-        */
+
+        Evaluator.EvalResult evalResult = evaluator.evaluate(flag, user, includeReasonInEvents);
+
+        if (evalResult.getValue() == null) {
+            evalResult = new Evaluator.EvalResult(defaultValue, null, evalResult.getReason());
+        }
+
+        Boolean requireExperimentData =
+            this.evaluator.isExperiment(flag, evalResult.getReason());
+
+        EvaluationReason reason;
+
+        if (includeReasonInEvents || this.evaluator.shouldForceReason(flag, evalResult.getReason())) {
+            reason = evalResult.getReason();
+        }
+
+        Event.Feature event = new Event.Feature(
+            featureKey, // key
+            user, // user
+            flag.getVersion(), // version
+            evalResult.getVariationIndex(), // variation
+            evalResult.getValue(), // value
+            defaultValue, // defaultValue
+            reason, // reason
+            null, // prereqOf
+            requireExperimentData || flag.getTrackEvents(), // trackEvents
+            flag.getDebugEventsUntilDate(), // debugEventsUntilDate
+            false, // debug
+            false, // unknown
+            this.getTime.now(), // now
+            config.getAllAttributesPrivate() // allAttributesPrivate
+        );
+
+        this.eventSink.sinkFeature(event);
+
+        for (Event.Feature prereqEvent : evalResult.getPrerequisiteEvents()) {
+            this.eventSink.sinkFeature(prereqEvent);
+        }
+
+        return evalResult;
     }
 }

@@ -156,7 +156,7 @@ global with sharing class WrapperREST {
     private static LDClient buildClient(Object body) {
         Map<String, Object> bodyMap = (Map<String, Object>)body;
 
-        LDConfig.Builder builder = new LDConfig.Builder('sdk-xyz');
+        LDConfig.Builder builder = new LDConfig.Builder();
 
         if (bodyMap.get('allAttributesPrivate') == true) {
             builder.setAllAttributesPrivate(true);
