@@ -1,7 +1,7 @@
 @isTest
 private class EventRESTTest {
     @isTest static void basicBundle() {
-        EventSink sink = new EventSink();
+        EventSink sink = new EventSink(1000);
         
         sink.sinkIdentify(new Event.Identify(new LDUser.Builder('abc').build(), 0, false));
         

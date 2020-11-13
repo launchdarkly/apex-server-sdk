@@ -31,7 +31,7 @@ public class LDClient {
         }
 
         this.store     = new DataStore();
-        this.eventSink = new EventSink();
+        this.eventSink = new EventSink(this.config.getMaxEventsInQueue());
         this.getTime   = new GetTimeImpl();
         this.evaluator = new Evaluator(this.store, this.getTime);
     }

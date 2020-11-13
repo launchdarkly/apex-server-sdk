@@ -11,6 +11,7 @@ See `LDConfig.Builder` for descriptions.
 
 ```java
 Boolean getAllAttributesPrivate()
+Integer getMaxEventsInQueue()
 ```
 
 ## class LDConfig.Builder
@@ -34,6 +35,15 @@ user attributes. If `allAttributesPrivate` is set to `null` it defaults to
 
 ```java
 Builder setAllAttributesPrivate(Boolean allAttributesPrivate)
+```
+
+The maximum number of events that can be queued for collection by the bridge.
+If this limit is breached before events are delivered by the bridge events
+will be dropped to prevent resource exhaustion. The default limit is 1000
+queued events. If `maxEvents` is set to `null` the default limit is used.
+
+```java
+Builder setMaxEventsInQueue(Integer maxEvents)
 ```
 
 ### Other methods
