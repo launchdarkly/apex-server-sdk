@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	LD_BASE_URI   = "https://app.launchdarkly.com"
+	LD_BASE_URI   = "https://sdk.launchdarkly.com"
 	LD_EVENTS_URI = "https://events.launchdarkly.com"
 	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
 	POLL_INTERVAL = 30 * time.Second
