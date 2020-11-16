@@ -34,17 +34,19 @@ func getEnvRequired(env string) string {
 }
 
 func getAuthorization() string {
-	OAUTH_ID := getEnvRequired("OAUTH_ID")
-	OAUTH_SECRET := getEnvRequired("OAUTH_SECRET")
-	OAUTH_REFRESH_TOKEN := getEnvRequired("OAUTH_REFRESH_TOKEN")
+	oauthId := getEnvRequired("OAUTH_ID")
+	oauthSecret := getEnvRequired("OAUTH_SECRET")
+	oauthUsername := getEnvRequired("OAUTH_USERNAME")
+	oauthPassword := getEnvRequired("OAUTH_PASSWORD")
 
 	client := &http.Client{}
 
 	query := url.Values{}
-	query.Add("grant_type", "refresh_token")
-	query.Add("client_id", OAUTH_ID)
-	query.Add("client_secret", OAUTH_SECRET)
-	query.Add("refresh_token", OAUTH_REFRESH_TOKEN)
+	query.Add("grant_type", "password")
+	query.Add("client_id", oauthId)
+	query.Add("client_secret", oauthSecret)
+	query.Add("username", oauthUsername)
+	query.Add("password", oauthPassword)
 
 	authRequest, err := http.NewRequest("POST", OAUTH_URI, strings.NewReader(query.Encode()))
 
@@ -70,9 +72,6 @@ func getAuthorization() string {
 		log.Panic("failed to read auth response body")
 	}
 
-	// authString := string(authBytes)
-	// log.Print(authString)
-
 	var parsed AuthBody;
 	json.Unmarshal(authBytes, &parsed)
 
@@ -83,28 +82,30 @@ func getAuthorization() string {
 	return parsed.AccessToken
 }
 
+// Pull events from Salesforce and send them to LaunchDarkly
 func eventLoop(salesforceURL string, launchDarklyKey string, salesforceToken string) {
 	client := &http.Client{}
+
 	pollURI := salesforceURL + "event"
 	pushURI := LD_EVENTS_URI + "/bulk"
 
 	for {
 		pollRequest, err := http.NewRequest("GET", pollURI, nil)
-		
+
 		pollRequest.Header.Set("Content-Type", "application/json")
 		pollRequest.Header.Set("Authorization", "Bearer " + salesforceToken)
-		
+
 		log.Print("requesting events from: " + pollURI)
 
 		pollResponse, err := client.Do(pollRequest)
-		
+
 		if err != nil {
-			log.Print("poll flags failed")
+			log.Print("poll events failed")
 
 			goto End
 		} else {
 			if pollResponse.StatusCode != 200 {
-				log.Print("poll expected 200")
+				log.Print("poll events expected 200")
 
 				goto End
 			}
@@ -112,36 +113,33 @@ func eventLoop(salesforceURL string, launchDarklyKey string, salesforceToken str
 			pollBytes, err := ioutil.ReadAll(pollResponse.Body)
 
 			if err != nil {
-				log.Panic("failed to read poll response body")
+				log.Panic("failed to read poll events response body")
 			}
 
-			pollString := string(pollBytes)
-			log.Print(pollString)
-			
 			pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewBuffer(pollBytes))
-			
+
 			if err != nil {
-				log.Panic("failed constructing push request ", err)
+				log.Panic("failed constructing event push request ", err)
 			}
-			
+
 			pushRequest.Header.Set("Content-Type", "application/json")
 			pushRequest.Header.Set("X-LaunchDarkly-Event-Schema", "3")
 			pushRequest.Header.Set("Authorization", launchDarklyKey)
-			
+
 			log.Print("pushing events to: " + pushURI)
-			
+
 			pushResponse, err := client.Do(pushRequest)
-			
+
 			if err != nil {
 				log.Panic("failed pushing events to LaunchDarkly")
 			}
 
 			if pushResponse.StatusCode == 401 || pushResponse.StatusCode == 403 {
-				log.Panic("pushing flags unauthorized")
+				log.Panic("pushing events unauthorized")
 			}
 
 			if pushResponse.StatusCode != 200 && pushResponse.StatusCode != 202 {
-				log.Print("push expected 200/202 got: ", pushResponse.StatusCode);
+				log.Print("event push expected 200/202 got: ", pushResponse.StatusCode);
 
 				goto End
 			}
@@ -154,15 +152,9 @@ func eventLoop(salesforceURL string, launchDarklyKey string, salesforceToken str
 	}
 }
 
-func main() {
-	LD_SDK_KEY := getEnvRequired("LD_SDK_KEY")
-	SALESFORCE_URL := getEnvRequired("SALESFORCE_URL")
-
-	tokenSalesForce := getAuthorization()
-
+// Pull flags from LaunchDarkly and send them to Salesforce
+func featureLoop(salesforceURL string, launchDarklyKey string, salesforceToken string) {
 	client := &http.Client{}
-	
-	go eventLoop(SALESFORCE_URL, LD_SDK_KEY, tokenSalesForce);
 
 	var etag = ""
 
@@ -172,10 +164,10 @@ func main() {
 		pollRequest, err := http.NewRequest("GET", pollURI, nil)
 
 		if err != nil {
-			log.Panic("failed constructing poll request ", err)
+			log.Panic("failed constructing flag poll request ", err)
 		}
 
-		pollRequest.Header.Set("Authorization", LD_SDK_KEY)
+		pollRequest.Header.Set("Authorization", launchDarklyKey)
 
 		if etag != "" {
 			pollRequest.Header.Set("If-None-Match", etag)
@@ -195,13 +187,13 @@ func main() {
 			}
 
 			if pollResponse.StatusCode == 304 {
-				log.Print("poll received 304 skipping update")
+				log.Print("poll flags received 304 skipping update")
 
 				goto End
 			}
 
 			if pollResponse.StatusCode != 200 {
-				log.Print("poll expected 200")
+				log.Print("poll flags expected 200, got ", pollResponse.StatusCode)
 
 				goto End
 			}
@@ -211,29 +203,26 @@ func main() {
 			pollBytes, err := ioutil.ReadAll(pollResponse.Body)
 
 			if err != nil {
-				log.Panic("failed to read poll response body")
+				log.Panic("failed to read flag poll response body")
 			}
 
-			// pollString := string(pollBytes)
-			// log.Print(pollString)
-
-			pushURI := SALESFORCE_URL + "store"
+			pushURI := salesforceURL + "store"
 
 			pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewBuffer(pollBytes))
 
 			if err != nil {
-				log.Panic("failed constructing push request ", err)
+				log.Panic("failed constructing flag push request ", err)
 			}
 
 			pushRequest.Header.Set("Content-Type", "application/json")
-			pushRequest.Header.Set("Authorization", "Bearer " + tokenSalesForce)
+			pushRequest.Header.Set("Authorization", "Bearer " + salesforceToken)
 
 			log.Print("pushing flags to: " + pushURI)
 
 			pushResponse, err := client.Do(pushRequest)
 
 			if err != nil {
-				log.Panic("failed getting test from salesforce")
+				log.Panic("failed pushings flags to salesforce")
 			}
 
 			if pushResponse.StatusCode == 401 || pushResponse.StatusCode == 403 {
@@ -241,7 +230,7 @@ func main() {
 			}
 
 			if pushResponse.StatusCode != 200 {
-				log.Print("push expected 200")
+				log.Print("push flags expected 200 got ", pushRequest)
 
 				goto End
 			}
@@ -254,4 +243,15 @@ func main() {
 
 		time.Sleep(POLL_INTERVAL)
 	}
+}
+
+func main() {
+	launchDarklyKey := getEnvRequired("LD_SDK_KEY")
+	salesforceURL := getEnvRequired("SALESFORCE_URL")
+
+ 	salesforceToken := getAuthorization()
+
+	go eventLoop(salesforceURL, launchDarklyKey, salesforceToken)
+	
+	featureLoop(salesforceURL, launchDarklyKey, salesforceToken)
 }
