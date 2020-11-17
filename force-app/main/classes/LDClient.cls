@@ -35,6 +35,10 @@ public class LDClient {
         this.getTime   = new GetTimeImpl();
         this.evaluator = new Evaluator(this.store, this.getTime);
     }
+    
+    public LDClient() {
+        this(new LDConfig.Builder().build());
+    }
 
     public Boolean boolVariation(LDUser user, String key, Boolean fallback) {
         Evaluator.EvalResult result = this.evaluateInternal(key, user, LDValue.of(fallback), true, false);

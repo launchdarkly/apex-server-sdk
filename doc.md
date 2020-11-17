@@ -66,6 +66,12 @@ not initialize a connection to LaunchDarkly and is instantaneous. If `config` is
 LDClient(LDConfig config)
 ```
 
+A second constructor is available that always uses a default `LDConfig`.
+
+```java
+LDClient()
+```
+
 ### Evaluation methods without details
 
 Evaluate the flag `key` for `user`, returning `fallback` on failure. If either
