@@ -17,6 +17,8 @@ const (
 	LD_EVENTS_URI = "https://events.launchdarkly.com"
 	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
 	POLL_INTERVAL = 30 * time.Second
+	SDK_VERSION   = "0.1.0-beta"
+	USER_AGENT    = "ApexServerClient/"+SDK_VERSION
 )
 
 type AuthBody struct {
@@ -125,6 +127,7 @@ func eventLoop(salesforceURL string, launchDarklyKey string, salesforceToken str
 			pushRequest.Header.Set("Content-Type", "application/json")
 			pushRequest.Header.Set("X-LaunchDarkly-Event-Schema", "3")
 			pushRequest.Header.Set("Authorization", launchDarklyKey)
+			pushRequest.Header.Set("User-Agent", USER_AGENT)
 
 			log.Print("pushing events to: " + pushURI)
 
@@ -168,6 +171,7 @@ func featureLoop(salesforceURL string, launchDarklyKey string, salesforceToken s
 		}
 
 		pollRequest.Header.Set("Authorization", launchDarklyKey)
+		pollRequest.Header.Set("User-Agent", USER_AGENT)
 
 		if etag != "" {
 			pollRequest.Header.Set("If-None-Match", etag)
