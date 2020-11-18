@@ -1,6 +1,8 @@
-# LaunchDarkly Server-Side SDK for SalesForce Apex
+# LaunchDarkly Server-Side SDK for Salesforce Apex
 
 [![CircleCI](https://circleci.com/gh/launchdarkly/apex-server-sdk.svg?style=svg)](https://circleci.com/gh/launchdarkly/apex-server-sdk)
+
+*This version of the SDK is a **beta** version and should not be considered ready for production use while this message is visible.*
 
 ## Getting started
 

@@ -1,4 +1,4 @@
-# Contributing to the LaunchDarkly Server-Side SDK for C/C++
+# Contributing to the LaunchDarkly Server-Side SDK for Apex
 
 LaunchDarkly has published an [SDK contributor's guide](https://docs.launchdarkly.com/docs/sdk-contributors-guide) that provides a detailed explanation of how our SDKs work. See below for additional information on how to contribute to this SDK.
 
