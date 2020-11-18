@@ -1,0 +1,19 @@
+version: 2.1
+
+workflows:
+  version: 2
+  all_tasks:
+    jobs:
+      - build-bridge
+
+jobs:
+  build-bridge:
+    docker:
+      - image: cimg/go:1.15
+    steps:
+      - checkout
+      - run:
+          name: Build
+          command: |
+            cd bridge
+            go build .
