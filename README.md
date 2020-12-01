@@ -10,7 +10,7 @@ Download a release archive from the [GitHub Releases](https://github.com/launchd
 
 ## Learn more
 
-Check out our [documentation](https://docs.launchdarkly.com) for in-depth instructions on configuring and using LaunchDarkly. You can also head straight to the [complete reference guide for this SDK](https://docs.launchdarkly.com/docs/apex-server-sdk-reference).
+Check out our [documentation](https://docs.launchdarkly.com) for in-depth instructions on configuring and using LaunchDarkly. You can also head straight to the [complete reference guide for this SDK](https://docs.launchdarkly.com/sdk/server-side/apex).
 
 ## Testing
 
