@@ -33,4 +33,7 @@ export OAUTH_PASSWORD='Your Salesforce password + security token'
 # optional configuration options
 export OAUTH_URI='YOUR OAUTH URI'
 # such as: 'https://login.salesforce.com/services/oauth2/token'
+export HTTP_TIMEOUT='Your timeout'
+# such as: '1500ms'
+# see https://golang.org/pkg/time/#ParseDuration for formatting
 ```

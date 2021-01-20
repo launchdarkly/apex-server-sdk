@@ -30,6 +30,7 @@ const (
 	POLL_INTERVAL = 30 * time.Second
 	SDK_VERSION   = "1.0.0-beta.2"
 	USER_AGENT    = "ApexServerClient/"+SDK_VERSION
+	HTTP_TIMEOUT  = 30 * time.Second
 )
 
 type Bridge struct {
@@ -52,10 +53,6 @@ type Bridge struct {
 
 func newBridge() (*Bridge, error) {
 	var bridge Bridge
-
-	bridge.client = http.Client{
-		Timeout: 10 * time.Second,
-	}
 
 	bridge.launchDarklyKey = os.Getenv("LD_SDK_KEY")
 	if bridge.launchDarklyKey == "" {
@@ -122,6 +119,23 @@ func newBridge() (*Bridge, error) {
 	bridge.oauthUsername = os.Getenv("OAUTH_USERNAME")
 	if bridge.oauthUsername == "" {
 		return nil, errors.New("OAUTH_USERNAME not set")
+	}
+
+	httpTimeoutDuration := HTTP_TIMEOUT
+	httpTimeout := os.Getenv("HTTP_TIMEOUT")
+	if httpTimeout != "" {
+		httpTimeout, err := time.ParseDuration(httpTimeout)
+		if err != nil {
+			return nil, errors.New("HTTP_TIMEOUT parse failed")
+		}
+		if httpTimeout < 0 {
+			return nil, errors.New("HTTP_TIMEOUT must be >= 0")
+		}
+		httpTimeoutDuration = httpTimeout
+	}
+
+	bridge.client = http.Client{
+		Timeout: httpTimeoutDuration,
 	}
 
 	context, cancel := context.WithCancel(context.Background())
