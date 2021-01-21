@@ -1,10 +1,15 @@
 version: 2.1
 
+orbs:
+  sfdx: circleci/salesforce-sfdx@2.1.0
+
 workflows:
   version: 2
   all_tasks:
     jobs:
       - build-bridge
+      - unit-test:
+          context: apex-sdk-ci
 
 jobs:
   build-bridge:
@@ -17,3 +22,20 @@ jobs:
           command: |
             cd bridge
             go build .
+
+  unit-test:
+    executor: sfdx/default
+    steps:
+      - checkout
+      - sfdx/install
+      - sfdx/auth:
+          defaultusername: ${DEFAULT_USERNAME}
+      - sfdx/scratch-create:
+          scratch-alias: circleci
+          scratch-config: ./config/project-scratch-def.json
+      - sfdx/scratch-open:
+          scratch-alias: circleci
+      - run: sfdx force:source:push -u circleci
+      - run: sfdx force:apex:test:run --synchronous -u circleci
+      - sfdx/scratch-delete:
+          scratch-alias: circleci
