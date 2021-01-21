@@ -1,0 +1,6 @@
+repo:
+  public: apex-server-sdk
+  private: apex-server-sdk-private
+
+sdk:
+  displayName: "Apex (server-side)"
