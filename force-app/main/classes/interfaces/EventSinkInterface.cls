@@ -4,4 +4,6 @@ public interface EventSinkInterface {
     void sinkCustom(Event.Custom event);
 
     void sinkFeature(Event.Feature event);
+
+    void sinkAlias(Event.Alias event);
 }

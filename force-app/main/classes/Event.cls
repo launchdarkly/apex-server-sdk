@@ -1,4 +1,14 @@
 public class Event {
+    public static String userToContextKind(LDUser user) {
+        System.assertNotEquals(user, null);
+
+        if (user.getAnonymous()) {
+            return 'anonymousUser';
+        } else {
+            return 'user';
+        }
+    }
+
     public class Identify {
         private final String key;
         private final Object user;
@@ -26,9 +36,43 @@ public class Event {
         }
     }
 
+    public class Alias {
+        private final String key;
+        private final String contextKind;
+        private final String previousKey;
+        private final string previousContextKind;
+        private final Long   now;
+
+        public Alias(LDUser currentUser, LDUser previousUser, Long now) {
+            System.assertNotEquals(currentUser, null);
+            System.assertNotEquals(previousUser, null);
+            System.assertNotEquals(now, null);
+
+            this.key                 = currentUser.getKey();
+            this.contextKind         = Event.userToContextKind(currentUser);
+            this.previousKey         = previousUser.getKey();
+            this.previousContextKind = Event.userToContextKind(previousUser);
+            this.now                 = now;
+        }
+
+        public Object toGeneric() {
+            Map<String, Object> event = new Map<String, Object>();
+
+            event.put('kind', 'alias');
+            event.put('key', this.key);
+            event.put('contextKind', this.contextKind);
+            event.put('previousKey', this.previousKey);
+            event.put('previousContextKind', this.previousContextKind);
+            event.put('creationDate', this.now);
+
+            return (Object)event;
+        }
+    }
+
     public class Custom {
         private final Object  user;
         private final String  key;
+        private final String  contextKind;
         private final Double  optionalMetric;
         private final LDValue optionalValue;
         private final Long    now;
@@ -51,6 +95,10 @@ public class Event {
             this.optionalMetric = optionalMetric;
             this.optionalValue  = optionalValue;
             this.now            = now;
+
+            if (user.getAnonymous()) {
+                this.contextKind = Event.userToContextKind(user);
+            }
         }
 
         public Object toGeneric() {
@@ -67,7 +115,11 @@ public class Event {
             if (this.optionalValue != null) {
                 event.put('data', this.optionalValue.toGeneric());
             }
-            
+
+            if (this.contextKind != null) {
+                event.put('contextKind', this.contextKind);
+            }
+
             event.put('creationDate', this.now);
 
             return (Object)event;
@@ -87,6 +139,7 @@ public class Event {
         private final Object   reason;
         private final Boolean  debug;
         private final Boolean  unknown;
+        private final String   contextKind;
         private final Long     now;
 
         public Feature(
@@ -122,6 +175,10 @@ public class Event {
             
             if (user != null) {
                 this.user = user.toGeneric(allAttributesPrivate);
+
+                if (user.getAnonymous()) {
+                    this.contextKind = Event.userToContextKind(user);
+                }
             }
             
             if (value != null) {
@@ -154,6 +211,7 @@ public class Event {
             this.reason               = (Object)obj.get('reason');
             this.debug                = (Boolean)obj.get('debug');
             this.unknown              = (Boolean)obj.get('unknown');
+            this.contextKind          = (String)obj.get('contextKind');
             this.now                  = (Long)obj.get('creationDate');
         }
 
@@ -180,6 +238,10 @@ public class Event {
 
             if (this.reason != null) {
                 event.put('reason', this.reason);
+            }
+
+            if (this.contextKind != null) {
+                event.put('contextKind', this.contextKind);
             }
 
             event.put('debug', this.debug);

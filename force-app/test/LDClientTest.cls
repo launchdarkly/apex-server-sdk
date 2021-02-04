@@ -61,6 +61,36 @@ private class LDClientTest {
         System.assertEquals(events.get(0).Raw__c, expected);
     }
 
+    @isTest static void alias() {
+        LDConfig config       = new LDConfig.Builder().build();
+        LDUser   currentUser  = new LDUser.Builder('a').build();
+        LDUser   previousUser = new LDUser.Builder('b').build();
+        LDClient client       = new LDClient(config);
+
+        client.getTime = new GetTimeMock();
+
+        client.alias(currentUser, previousUser);
+
+        List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
+
+        String expected =
+              '{'
+            + '"creationDate":1,'
+            + '"key":"a",' 
+            + '"contextKind": "user",'
+            + '"previousKey":"b",'
+            + '"previousContextKind": "user",'
+            + '"kind":"alias"'
+            + '}';
+
+        System.assertEquals(events.size(), 1);
+        System.assertEquals(events.get(0).Kind__c, 'alias');
+        System.assertEquals(
+            JSON.deserializeUntyped(events.get(0).Raw__c),
+            JSON.deserializeUntyped(expected)
+        );
+    }
+
     @isTest static void trackMinimal() {
         LDConfig config = new LDConfig.Builder().build();
         LDUser   user   = new LDUser.Builder('user-key').build();

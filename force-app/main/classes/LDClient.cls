@@ -153,6 +153,16 @@ public class LDClient {
         this.eventSink.sinkCustom(new Event.Custom(user, key, optionalMetric, optionalValue, this.getTime.now(), config.getAllAttributesPrivate()));
     }
 
+    public void alias(LDUser currentUser, LDUser previousUser) {
+        if (currentUser == null || currentUser.getKey() == null
+            || previousUser == null || previousUser.getKey() == null)
+        {
+            return;
+        }
+
+        this.eventSink.sinkAlias(new Event.Alias(currentUser, previousUser, this.getTime.now()));
+    }
+
     private Evaluator.EvalResult evaluateInternal(
         String  featureKey,
         LDUser  user,
