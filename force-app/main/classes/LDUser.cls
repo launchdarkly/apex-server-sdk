@@ -211,7 +211,9 @@ public class LDUser {
         }
 
         public Builder setAnonymous(Boolean anonymous) {
-            this.anonymous = anonymous;
+            if (anonymous != null) {
+                this.anonymous = anonymous;
+            }
 
             return this;
         }

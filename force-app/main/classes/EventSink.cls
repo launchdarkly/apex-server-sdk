@@ -18,7 +18,11 @@ public class EventSink implements EventSinkInterface {
     public void sinkFeature(Event.Feature event) {
         this.sinkGeneric('feature', JSON.serialize(event.toGeneric()));
     }
-    
+
+    public void sinkAlias(Event.Alias event) {
+        this.sinkGeneric('alias', JSON.serialize(event.toGeneric()));
+    }
+
     public void sinkGeneric(String kind, String raw) {
         Integer count = [SELECT COUNT() FROM EventData__c];
         
