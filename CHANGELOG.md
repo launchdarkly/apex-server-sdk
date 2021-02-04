@@ -2,6 +2,11 @@
 
 All notable changes to the LaunchDarkly Apex server-side SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.0.0-beta.3] - 2021-02-04
+
+### Added:
+- Added the `alias` method. This can be used to associate two user objects for analytics purposes by generating an alias event.
+
 ## [1.0.0-beta.2] - 2021-01-20
 
 ### Added:
