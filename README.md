@@ -6,7 +6,7 @@
 
 ## Getting started
 
-Download a release archive from the [GitHub Releases](https://github.com/launchdarkly/apex-server-sdk/releases) for use in your project. Refer to the [SDK documentation](https://docs.launchdarkly.com/docs/apex-server-sdk-reference#section-getting-started) for complete instructions on getting started with using the SDK.
+Download a release archive from the [GitHub Releases](https://github.com/launchdarkly/apex-server-sdk/releases) for use in your project. Refer to the [SDK documentation](https://docs.launchdarkly.com/sdk/server-side/apex#getting-started) for complete instructions on getting started with using the SDK.
 
 ## Learn more
 
