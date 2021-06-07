@@ -2,8 +2,6 @@
 
 [![CircleCI](https://circleci.com/gh/launchdarkly/apex-server-sdk.svg?style=svg)](https://circleci.com/gh/launchdarkly/apex-server-sdk)
 
-*This version of the SDK is a **beta** version and should not be considered ready for production use while this message is visible.*
-
 ## Getting started
 
 Download a release archive from the [GitHub Releases](https://github.com/launchdarkly/apex-server-sdk/releases) for use in your project. Refer to the [SDK documentation](https://docs.launchdarkly.com/sdk/server-side/apex#getting-started) for complete instructions on getting started with using the SDK.
