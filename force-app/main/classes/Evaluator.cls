@@ -364,6 +364,11 @@ public class Evaluator {
 
     public Double bucketUser(LDUser user, String key, String attr, String salt) {
         LDValue userValue = user.getAttribute(attr == null ? 'key' : attr);
+
+        if (userValue == null) {
+            return 0;
+        }
+
         String idHash = this.getBucketableStringValue(userValue);
 
         if (idHash != null) {
