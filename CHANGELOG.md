@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly Apex server-side SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.0.0] - 2021-06-08
+### Fixed:
+- Fixed rollout bucketing behavior when targeting a user attribute that does not exist.
+
 ## [1.0.0-beta.3] - 2021-02-04
 
 ### Added:

@@ -28,7 +28,7 @@ const (
 	LD_EVENTS_URI = "https://events.launchdarkly.com"
 	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
 	POLL_INTERVAL = 30 * time.Second
-	SDK_VERSION   = "1.0.0-beta.2"
+	SDK_VERSION   = "1.0.0"
 	USER_AGENT    = "ApexServerClient/"+SDK_VERSION
 	HTTP_TIMEOUT  = 30 * time.Second
 )
