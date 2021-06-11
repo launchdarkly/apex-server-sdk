@@ -9,16 +9,16 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/pem"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,7 +29,7 @@ const (
 	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
 	POLL_INTERVAL = 30 * time.Second
 	SDK_VERSION   = "1.0.0"
-	USER_AGENT    = "ApexServerClient/"+SDK_VERSION
+	USER_AGENT    = "ApexServerClient/" + SDK_VERSION
 	HTTP_TIMEOUT  = 30 * time.Second
 )
 
@@ -78,7 +78,7 @@ func newBridge() (*Bridge, error) {
 	if bridge.oauthId == "" {
 		return nil, errors.New("OAUTH_ID not set")
 	}
-	
+
 	oauthURIString := os.Getenv("OAUTH_URI")
 	if oauthURIString == "" {
 		oauthURIString = OAUTH_URI
@@ -140,7 +140,7 @@ func newBridge() (*Bridge, error) {
 
 	context, cancel := context.WithCancel(context.Background())
 	bridge.context = context
-	bridge.cancel  = cancel
+	bridge.cancel = cancel
 
 	return &bridge, nil
 }
@@ -152,18 +152,18 @@ type AuthBody struct {
 type JWTClaim struct {
 	ISS string `json:"iss"`
 	Sub string `json:"sub"`
- 	Aud string `json:"aud"`
+	Aud string `json:"aud"`
 	Exp string `json:"exp"`
 }
 
 func (bridge *Bridge) makeJWT() (*string, error) {
-	var claim JWTClaim;
+	var claim JWTClaim
 
 	claim.ISS = bridge.oauthId
 	claim.Sub = bridge.oauthUsername
 	claim.Aud = bridge.oauthURI.Host
-	claim.Exp = strconv.FormatInt(time.Now().Unix() + (60 * 2), 10)
-	
+	claim.Exp = strconv.FormatInt(time.Now().Unix()+(60*2), 10)
+
 	bytesClaim, err := json.Marshal(claim)
 	if err != nil {
 		return nil, err
@@ -203,7 +203,7 @@ func (bridge *Bridge) authorizeSalesforce() (error, bool) {
 		query.Add("password", bridge.oauthPassword)
 	}
 
-	authRequest, err := http.NewRequest("POST", OAUTH_URI, strings.NewReader(query.Encode()))
+	authRequest, err := http.NewRequest("POST", bridge.oauthURI.String(), strings.NewReader(query.Encode()))
 	if err != nil {
 		return err, true
 	}
@@ -230,7 +230,7 @@ func (bridge *Bridge) authorizeSalesforce() (error, bool) {
 		return err, false
 	}
 
-	var parsed AuthBody;
+	var parsed AuthBody
 	json.Unmarshal(errorBody, &parsed)
 	if parsed.AccessToken == "" {
 		return errors.New("expected access token in body"), false
@@ -248,7 +248,7 @@ func (bridge *Bridge) requestWithOauth(request *http.Request) (*http.Response, e
 	token := bridge.oauthCurrentToken
 	bridge.lock.Unlock()
 
-	request.Header.Set("Authorization", "Bearer " + token)
+	request.Header.Set("Authorization", "Bearer "+token)
 
 	response, err := bridge.client.Do(request)
 	if err != nil {
@@ -288,16 +288,16 @@ func (bridge *Bridge) eventLoop() error {
 				log.Print("poll events expected 200 but got ", pollResponse.StatusCode)
 				goto End
 			}
-			
+
 			pollBytes, err := ioutil.ReadAll(pollResponse.Body)
 			if err != nil {
 				log.Print("failed to read poll events response body")
-				goto End;
+				goto End
 			}
 
 			if bytes.Equal(pollBytes, []byte("[]")) {
 				log.Print("No new events skipping delivery")
-				goto End;
+				goto End
 			}
 
 			pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewBuffer(pollBytes))
@@ -324,7 +324,7 @@ func (bridge *Bridge) eventLoop() error {
 			}
 
 			if pushResponse.StatusCode != 200 && pushResponse.StatusCode != 202 {
-				log.Print("event push expected 200/202 got: ", pushResponse.StatusCode);
+				log.Print("event push expected 200/202 got: ", pushResponse.StatusCode)
 				goto End
 			}
 		}
@@ -338,7 +338,6 @@ func (bridge *Bridge) eventLoop() error {
 		case <-time.After(POLL_INTERVAL):
 		}
 	}
-	return nil
 }
 
 func (bridge *Bridge) featureLoop() error {
@@ -426,7 +425,6 @@ func (bridge *Bridge) featureLoop() error {
 		case <-time.After(POLL_INTERVAL):
 		}
 	}
-	return nil
 }
 
 func (bridge *Bridge) run() error {
@@ -434,13 +432,13 @@ func (bridge *Bridge) run() error {
 	if err != nil {
 		return err
 	}
-	
+
 	c := make(chan error)
-	go func(){
+	go func() {
 		c <- bridge.eventLoop()
 		bridge.cancel()
 	}()
-	go func(){
+	go func() {
 		c <- bridge.featureLoop()
 		bridge.cancel()
 	}()
