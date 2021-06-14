@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly Apex server-side SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.0.1] - 2021-06-14
+### Fixed:
+- Fixed the OAUTH_URI environment variable not being respected by the bridge.
+
 ## [1.0.0] - 2021-06-08
 ### Fixed:
 - Fixed rollout bucketing behavior when targeting a user attribute that does not exist.
