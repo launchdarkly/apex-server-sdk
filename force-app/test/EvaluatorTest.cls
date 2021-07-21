@@ -234,13 +234,53 @@ private class EvaluatorTest {
         DataStoreMock store = new DataStoreMock();
         Evaluator evaluator = new Evaluator(store, new GetTimeMock());
 
-        Double v1 = evaluator.bucketUser(new LDUser.Builder('userKeyA').build(), 'hashKey', 'key', 'saltyA');
+        Double v1 = evaluator.bucketUser(new LDUser.Builder('userKeyA').build(), 'hashKey', 'key', 'saltyA', null);
         System.assertEquals(v1, (Double)0.42157587);
         
-        Double v2 = evaluator.bucketUser(new LDUser.Builder('userKeyB').build(), 'hashKey', 'key', 'saltyA');
+        Double v2 = evaluator.bucketUser(new LDUser.Builder('userKeyB').build(), 'hashKey', 'key', 'saltyA', null);
         System.assertEquals(v2, (Double)0.6708485);
         
-        Double v3 = evaluator.bucketUser(new LDUser.Builder('userKeyC').build(), 'hashKey', 'key', 'saltyA');
+        Double v3 = evaluator.bucketUser(new LDUser.Builder('userKeyC').build(), 'hashKey', 'key', 'saltyA', null);
         System.assertEquals(v3, (Double)0.10343106);
+    }
+
+    @isTest static void bucketUserWithSeed() {
+        DataStoreMock store = new DataStoreMock();
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
+
+        Double v1 = evaluator.bucketUser(new LDUser.Builder('userKeyA').build(), 'hashKey', 'key', 'saltyA', 61);
+        System.assertEquals(v1, (Double)0.09801207);
+        
+        Double v2 = evaluator.bucketUser(new LDUser.Builder('userKeyB').build(), 'hashKey', 'key', 'saltyA', 61);
+        System.assertEquals(v2, (Double)0.14483777);
+        
+        Double v3 = evaluator.bucketUser(new LDUser.Builder('userKeyC').build(), 'hashKey', 'key', 'saltyA', 61);
+        System.assertEquals(v3, (Double)0.92426409);
+    }
+
+    @isTest static void variationIndexForUser() {
+        DataStoreMock store = new DataStoreMock();
+        Evaluator evaluator = new Evaluator(store, new GetTimeMock());
+
+        DataModel.VariationOrRollout vor = new DataModel.VariationOrRollout();
+        DataModel.Rollout rollout = new DataModel.Rollout();
+        vor.rollout = rollout;
+        rollout.kind = DataModel.RolloutKind.EXPERIMENT;
+        rollout.variations = new List<DataModel.WeightedVariation>();
+
+        rollout.variations.add(new DataModel.WeightedVariation(0, 60000, true));
+        rollout.variations.add(new DataModel.WeightedVariation(1, 40000, false));
+
+        Evaluator.VariationIndexForUserResult v1 = evaluator.variationIndexForUser(vor, new LDUser.Builder('userKeyA').build(), 'hashKey', 'saltyA');
+        System.assertEquals(0, v1.variationIndex);
+        System.assertEquals(false, v1.inExperiment);
+
+        Evaluator.VariationIndexForUserResult v2 = evaluator.variationIndexForUser(vor, new LDUser.Builder('userKeyB').build(), 'hashKey', 'saltyA');
+        System.assertEquals(1, v2.variationIndex);
+        System.assertEquals(true, v2.inExperiment);
+
+        Evaluator.VariationIndexForUserResult v3 = evaluator.variationIndexForUser(vor, new LDUser.Builder('userKeyC').build(), 'hashKey', 'saltyA');
+        System.assertEquals(0, v3.variationIndex);
+        System.assertEquals(false, v3.inExperiment);
     }
 }

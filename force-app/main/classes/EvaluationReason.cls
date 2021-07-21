@@ -21,25 +21,28 @@ public class EvaluationReason {
     private final Integer   ruleIndex;
     private final String    ruleId;
     private final String    prerequisiteKey;
+    private final Boolean   inExperiment;
     private final ErrorKind errorKind;
 
-    private static final EvaluationReason OFF_INSTANCE             = new EvaluationReason(Kind.OFF);
-    private static final EvaluationReason FALLTHROUGH_INSTANCE     = new EvaluationReason(Kind.FALLTHROUGH);
-    private static final EvaluationReason TARGET_MATCH_INSTANCE    = new EvaluationReason(Kind.TARGET_MATCH);
-    private static final EvaluationReason ERROR_CLIENT_NOT_READY   = new EvaluationReason(ErrorKind.CLIENT_NOT_READY);
-    private static final EvaluationReason ERROR_FLAG_NOT_FOUND     = new EvaluationReason(ErrorKind.FLAG_NOT_FOUND);
-    private static final EvaluationReason ERROR_MALFORMED_FLAG     = new EvaluationReason(ErrorKind.MALFORMED_FLAG);
-    private static final EvaluationReason ERROR_USER_NOT_SPECIFIED = new EvaluationReason(ErrorKind.USER_NOT_SPECIFIED);
-    private static final EvaluationReason ERROR_WRONG_TYPE         = new EvaluationReason(ErrorKind.WRONG_TYPE);
-    private static final EvaluationReason ERROR_EXCEPTION_THROWN   = new EvaluationReason(ErrorKind.EXCEPTION_THROWN);
+    private static final EvaluationReason OFF_INSTANCE                           = new EvaluationReason(Kind.OFF);
+    private static final EvaluationReason FALLTHROUGH_INSTANCE_IN_EXPERIMENT     = new EvaluationReason(Kind.FALLTHROUGH, null, null, null, true, null);
+    private static final EvaluationReason FALLTHROUGH_INSTANCE_NOT_IN_EXPERIMENT = new EvaluationReason(Kind.FALLTHROUGH, null, null, null, false, null);
+    private static final EvaluationReason TARGET_MATCH_INSTANCE                  = new EvaluationReason(Kind.TARGET_MATCH);
+    private static final EvaluationReason ERROR_CLIENT_NOT_READY                 = new EvaluationReason(ErrorKind.CLIENT_NOT_READY);
+    private static final EvaluationReason ERROR_FLAG_NOT_FOUND                   = new EvaluationReason(ErrorKind.FLAG_NOT_FOUND);
+    private static final EvaluationReason ERROR_MALFORMED_FLAG                   = new EvaluationReason(ErrorKind.MALFORMED_FLAG);
+    private static final EvaluationReason ERROR_USER_NOT_SPECIFIED               = new EvaluationReason(ErrorKind.USER_NOT_SPECIFIED);
+    private static final EvaluationReason ERROR_WRONG_TYPE                       = new EvaluationReason(ErrorKind.WRONG_TYPE);
+    private static final EvaluationReason ERROR_EXCEPTION_THROWN                 = new EvaluationReason(ErrorKind.EXCEPTION_THROWN);
 
     private EvaluationReason(Kind kind, Integer ruleIndex, String ruleId,
-        String prerequisiteKey, ErrorKind errorKind)
+        String prerequisiteKey, Boolean inExperiment, ErrorKind errorKind)
     {
         this.kind            = kind;
         this.ruleIndex       = ruleIndex;
         this.ruleId          = ruleId;
         this.prerequisiteKey = prerequisiteKey;
+        this.inExperiment    = inExperiment;
         this.errorKind       = errorKind;
     }
 
@@ -48,6 +51,7 @@ public class EvaluationReason {
         this.ruleIndex       = null;
         this.ruleId          = null;
         this.prerequisiteKey = null;
+        this.inExperiment    = false;
         this.errorKind       = null;
     }
 
@@ -56,6 +60,7 @@ public class EvaluationReason {
         this.ruleIndex       = null;
         this.ruleId          = null;
         this.prerequisiteKey = null;
+        this.inExperiment    = false;
         this.errorKind       = errorKind;
     }
 
@@ -64,7 +69,15 @@ public class EvaluationReason {
     }
 
     public static EvaluationReason fallthrough() {
-        return FALLTHROUGH_INSTANCE;
+        return fallthrough(false);
+    }
+
+    public static EvaluationReason fallthrough(Boolean inExperiment) {
+        if (inExperiment) {
+            return FALLTHROUGH_INSTANCE_IN_EXPERIMENT;
+        } else {
+            return FALLTHROUGH_INSTANCE_NOT_IN_EXPERIMENT;
+        }
     }
 
     public static EvaluationReason targetMatch() {
@@ -76,11 +89,15 @@ public class EvaluationReason {
     }
 
     public static EvaluationReason prerequisiteFailed(String prerequisiteKey) {
-        return new EvaluationReason(Kind.PREREQUISITE_FAILED, null, null, prerequisiteKey, null);
+        return new EvaluationReason(Kind.PREREQUISITE_FAILED, null, null, prerequisiteKey, false, null);
     }
 
     public static EvaluationReason ruleMatch(Integer ruleIndex, String ruleId) {
-        return new EvaluationReason(Kind.RULE_MATCH, ruleIndex, ruleId, null, null);
+        return ruleMatch(ruleIndex, ruleId, false);
+    }
+
+    public static EvaluationReason ruleMatch(Integer ruleIndex, String ruleId, Boolean inExperiment) {
+        return new EvaluationReason(Kind.RULE_MATCH, ruleIndex, ruleId, null, inExperiment, null);
     }
 
     public static EvaluationReason error(ErrorKind errorKind) {
@@ -107,6 +124,10 @@ public class EvaluationReason {
 
     public Kind getKind() {
         return this.kind;
+    }
+
+    public Boolean isInExperiment() {
+        return this.inExperiment;
     }
 
     public Integer getRuleIndex() {
@@ -178,6 +199,15 @@ public class EvaluationReason {
             when RULE_MATCH {
                 rep.put('ruleIndex', this.ruleIndex);
                 rep.put('ruleId', this.ruleId);
+
+                if (this.inExperiment == true) {
+                    rep.put('inExperiment', true);
+                }
+            }
+            when FALLTHROUGH {
+                if (this.inExperiment == true) {
+                    rep.put('inExperiment', true);
+                }
             }
             when else {
                 // nothing

@@ -1,18 +1,36 @@
 public class DataModel {
+    public static WeightedVariation parseWeightedVariation(Object raw) {
+        System.assertNotEquals(raw, null);
+
+        Map<String, Object> obj = (Map<String, Object>)raw;
+
+        return new WeightedVariation(
+            (Integer)obj.get('variation'),
+            (Double)obj.get('weight'),
+            (Boolean)obj.get('untracked')
+        );
+    }
+
     public class WeightedVariation {
         private final Integer variation;
         private final Double  weight;
+        private final Boolean untracked;
+  
+        public WeightedVariation(Integer variation, Double weight, Boolean untracked) {
+            System.assertNotEquals(variation, null);
+            System.assertNotEquals(weight, null);
 
-        public WeightedVariation(Object raw) {
-            System.assertNotEquals(raw, null);
+            this.variation = variation;
+            this.weight    = weight;
+            this.untracked = untracked;
 
-            Map<String, Object> obj = (Map<String, Object>)raw;
+            if (untracked == null) {
+                this.untracked = false;
+            }
+        }
 
-            this.variation = (Integer)obj.get('variation');
-            this.weight    = (Double)obj.get('weight');
-
-            System.assertNotEquals(this.variation, null);
-            System.assertNotEquals(this.weight, null);
+        public Boolean isUntracked() {
+            return this.untracked;
         }
 
         public Integer getVariation() {
@@ -24,9 +42,31 @@ public class DataModel {
         }
     }
 
+    public enum RolloutKind {
+        ROLLOUT,
+        EXPERIMENT
+    }
+
     public class Rollout {
-        private final String bucketBy;
-        private final List<WeightedVariation> variations;
+        private RolloutKind rolloutKindFromString(String kind) {
+            switch on kind {
+                when 'rollout' {
+                    return RolloutKind.ROLLOUT;
+                }
+                when 'experiment' {
+                    return RolloutKind.EXPERIMENT;
+                }
+            }
+
+            return null;
+        }
+
+        public String                  bucketBy;
+        public List<WeightedVariation> variations;
+        public RolloutKind             kind;
+        public Integer                 seed;
+
+        public Rollout() {}
 
         public Rollout(Object raw) {
             System.assertNotEquals(raw, null);
@@ -34,16 +74,23 @@ public class DataModel {
             Map<String, Object> obj = (Map<String, Object>)raw;
 
             this.bucketBy   = (String)obj.get('bucketBy');
-            this.variations = null;
+            this.variations = new List<WeightedVariation>();
+            this.seed       = (Integer)obj.get('seed');
 
             List<Object> variations = (List<Object>)obj.get('variations');
 
             if (variations != null) {
-                this.variations = new List<WeightedVariation>();
-
                 for (Object variation : variations) {
-                    this.variations.add(new DataModel.WeightedVariation(variation));
+                    this.variations.add(DataModel.parseWeightedVariation(variation));
                 }
+            }
+
+            String kind = (String)obj.get('kind');
+
+            if (kind == null) {
+                this.kind = RolloutKind.ROLLOUT;
+            } else {
+                this.kind = this.rolloutKindFromString(kind);
             }
         }
 
@@ -53,6 +100,14 @@ public class DataModel {
 
         public List<WeightedVariation> getVariations() {
             return this.variations;
+        }
+
+        public RolloutKind getKind() {
+            return this.kind;
+        }
+
+        public Integer getSeed() {
+            return this.seed;
         }
     }
 

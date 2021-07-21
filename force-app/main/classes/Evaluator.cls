@@ -84,15 +84,50 @@ public class Evaluator {
             DataModel.Rule rule = rules.get(i);
 
             if (this.ruleMatchesUser(flag, rule, user)) {
-                 EvaluationReason reason = EvaluationReason.ruleMatch(i, rule.getId());
+                VariationIndexForUserResult indexResult = this.variationIndexForUser(
+                    rule.getVariationOrRollout(),
+                    user,
+                    flag.getKey(),
+                    flag.getSalt()
+                );
 
-                 return this.getValueForVariationOrRollout(flag, rule.getVariationOrRollout(), user, reason);
+                if (indexResult == null) {
+                    return new EvalResult(EvaluationReason.ErrorKind.MALFORMED_FLAG);
+                }
+
+                return this.getVariation(
+                    flag,
+                    indexResult.variationIndex,
+                    EvaluationReason.ruleMatch(i, rule.getId(), indexResult.inExperiment)
+                );
             }
         }
 
-        return this.getValueForVariationOrRollout(flag, flag.getFallthrough(), user, EvaluationReason.fallthrough());
+        return this.getFallthroughResult(flag, user);
     }
-    
+
+    private EvalResult getFallthroughResult(
+        DataModel.Flag flag,
+        LDUser         user
+    ) {
+        VariationIndexForUserResult indexResult = this.variationIndexForUser(
+            flag.getFallthrough(),
+            user,
+            flag.getKey(),
+            flag.getSalt()
+        );
+
+        if (indexResult == null) {
+            return new EvalResult(EvaluationReason.ErrorKind.MALFORMED_FLAG);
+        }
+
+        return this.getVariation(
+            flag,
+            indexResult.variationIndex,
+            EvaluationReason.fallthrough(indexResult.inExperiment)
+        );
+    }
+
     public Boolean shouldForceReason(DataModel.Flag flag, EvaluationReason reason) {
         if (reason.getKind() == EvaluationReason.Kind.FALLTHROUGH) {
             return flag.getTrackEventsFallthrough();
@@ -106,9 +141,13 @@ public class Evaluator {
     public Boolean isExperiment(DataModel.Flag flag, EvaluationReason reason) {
         switch on reason.getKind() {
             when FALLTHROUGH {
-                return flag.getTrackEventsFallthrough();
+                return reason.isInExperiment() || flag.getTrackEventsFallthrough();
             }
             when RULE_MATCH {
+                if (reason.isInExperiment()) {
+                    return true;
+                }
+
                 Integer index = reason.getRuleIndex();
 
                 if (index >= 0 && index < flag.getRules().size()) {
@@ -145,9 +184,9 @@ public class Evaluator {
 
                 Boolean requireExperimentData =
                     this.isExperiment(prereqFeatureFlag, prereqEvalResult.getReason());
-                
+
                 EvaluationReason reason;
-    
+
                 if (includeReasonInEvents || this.shouldForceReason(prereqFeatureFlag, prereqEvalResult.getReason())) {
                     reason = prereqEvalResult.getReason();
                 }
@@ -195,16 +234,6 @@ public class Evaluator {
             return new EvalResult(EvaluationReason.ErrorKind.MALFORMED_FLAG);
         } else {
             return new EvalResult(variations.get(variation), variation, reason);
-        }
-    }
-
-    private EvalResult getValueForVariationOrRollout(DataModel.Flag flag, DataModel.VariationOrRollout vr, LDUser user, EvaluationReason reason) {
-        Integer index = this.variationIndexForUser(vr, user, flag.getKey(), flag.getSalt());
-
-        if (index == null) {
-            return new EvalResult(EvaluationReason.ErrorKind.MALFORMED_FLAG);
-        } else {
-            return this.getVariation(flag, index, reason);
         }
     }
 
@@ -317,39 +346,53 @@ public class Evaluator {
             return true;
         }
 
-        double bucket = this.bucketUser(user, segmentKey, segmentRule.getBucketBy(), salt);
+        double bucket = this.bucketUser(user, segmentKey, segmentRule.getBucketBy(), salt, null);
         double weight = (double)segmentRule.getWeight() / 100000.0;
 
         return bucket < weight;
     }
 
-    private Integer variationIndexForUser(DataModel.VariationOrRollout vr, LDUser user, String key, String salt) {
+    public class VariationIndexForUserResult {
+        public final Integer variationIndex;
+        public final Boolean inExperiment;
+
+        public VariationIndexForUserResult(Integer variationIndex, Boolean inExperiment) {
+            this.variationIndex = variationIndex;
+            this.inExperiment   = inExperiment;
+        }
+    }
+
+    public VariationIndexForUserResult variationIndexForUser(DataModel.VariationOrRollout vr, LDUser user, String key, String salt) {
         Integer variation = vr.getVariation();
 
         if (variation != null) {
-            return variation;
+            return new VariationIndexForUserResult(variation, false);
         } else {
             DataModel.Rollout rollout = vr.getRollout();
 
             if (rollout != null && !rollout.getVariations().isEmpty()) {
-                Double bucket = this.bucketUser(user, key, rollout.getBucketBy(), salt);
+                Boolean inExperiment = rollout.getKind() == DataModel.RolloutKind.EXPERIMENT;
+
+                Double bucket = this.bucketUser(user, key, rollout.getBucketBy(), salt, rollout.getSeed());
                 Double sum = 0;
 
                 for (DataModel.WeightedVariation wv : rollout.getVariations()) {
                     sum += (Double)wv.getWeight() / (Double)100000.0;
 
                     if (bucket < sum) {
-                        return wv.getVariation();
+                        return new VariationIndexForUserResult(wv.getVariation(), !wv.isUntracked() && inExperiment);
                     }
                 }
 
-                return rollout.getVariations().get(rollout.getVariations().size() - 1).getVariation();
+                DataModel.WeightedVariation wv = rollout.getVariations().get(rollout.getVariations().size() - 1);
+
+                return new VariationIndexForUserResult(wv.getVariation(), !wv.isUntracked() && inExperiment);
             }
         }
 
         return null;
     }
-    
+
     public Decimal hexToDecimal(String input) {
         String alphabet = '0123456789abcdef';
 
@@ -362,7 +405,7 @@ public class Evaluator {
         return acc;
     }
 
-    public Double bucketUser(LDUser user, String key, String attr, String salt) {
+    public Double bucketUser(LDUser user, String key, String attr, String salt, Integer seed) {
         LDValue userValue = user.getAttribute(attr == null ? 'key' : attr);
 
         if (userValue == null) {
@@ -372,11 +415,19 @@ public class Evaluator {
         String idHash = this.getBucketableStringValue(userValue);
 
         if (idHash != null) {
-            if (user.getSecondary() != null){
-                idHash = idHash + '.' + user.getSecondary();
+            String secondarySuffix = '';
+
+            if (user.getSecondary() != null) {
+                secondarySuffix = '.' + user.getSecondary();
             }
 
-            Blob targetBlob = Blob.valueOf(key + '.' + salt + '.' + idHash);
+            Blob targetBlob;
+
+            if (seed != null) {
+                targetBlob = Blob.valueOf(String.valueOf(seed) + '.' + idHash + secondarySuffix);
+            } else {
+                targetBlob = Blob.valueOf(key + '.' + salt + '.' + idHash + secondarySuffix);
+            }
 
             String hash = EncodingUtil.convertToHex(Crypto.generateDigest('SHA1', targetBlob))
                 .substring(0, 15);
