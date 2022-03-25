@@ -105,9 +105,12 @@ func newBridge() (*Bridge, error) {
 		if err != nil {
 			return nil, errors.New("OAUTH_JWT_KEY base64 decode failed")
 		}
-		pem, _ := pem.Decode([]byte(decodedString))
+		pem, _ := pem.Decode(decodedString)
+		if pem == nil {
+			return nil, errors.New("OAUTH_JWT_KEY PEM decode failed")
+		}
 		if pem.Type != "RSA PRIVATE KEY" {
-			return nil, errors.New("OAUTH_JWT_KEY PEM expected RSA PRIVATE KEY failed")
+			return nil, errors.New("OAUTH_JWT_KEY PEM missing RSA PRIVATE KEY block")
 		}
 		decodedX509, err := x509.ParsePKCS1PrivateKey(pem.Bytes)
 		if err != nil {
