@@ -103,15 +103,18 @@ func newBridge() (*Bridge, error) {
 	} else {
 		decodedString, err := base64.StdEncoding.DecodeString(oauthJWTKey)
 		if err != nil {
-			return nil, errors.New("OAUTH_JWT_KEY base64 decode failed")
+			return nil, errors.New("OAUTH_JWT_KEY is not valid standard-encoding base64")
 		}
-		pem, _ := pem.Decode([]byte(decodedString))
+		pem, _ := pem.Decode(decodedString)
+		if pem == nil {
+			return nil, errors.New("OAUTH_JWT_KEY is not a valid PEM-encoded block")
+		}
 		if pem.Type != "RSA PRIVATE KEY" {
-			return nil, errors.New("OAUTH_JWT_KEY PEM expected RSA PRIVATE KEY failed")
+			return nil, errors.New("OAUTH_JWT_KEY PEM block must be called 'RSA PRIVATE KEY'")
 		}
 		decodedX509, err := x509.ParsePKCS1PrivateKey(pem.Bytes)
 		if err != nil {
-			return nil, errors.New("OAUTH_JWT_KEY x509 decode failed")
+			return nil, errors.New("OAUTH_JWT_KEY failed to decode PKCS1 private key from PEM bytes")
 		}
 		bridge.oauthJWTKey = decodedX509
 	}
