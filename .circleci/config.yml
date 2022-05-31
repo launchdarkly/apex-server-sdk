@@ -1,7 +1,7 @@
 version: 2.1
 
 orbs:
-  sfdx: circleci/salesforce-sfdx@2.1.0
+  sfdx: circleci/salesforce-sfdx@2.2.0
 
 workflows:
   version: 2
