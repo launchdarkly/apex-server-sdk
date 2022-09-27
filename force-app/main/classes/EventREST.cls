@@ -15,7 +15,7 @@ global with sharing class EventREST {
             switch on event.Kind__c {
                 when 'feature' {
                     Object parsed = (Object)JSON.deserializeUntyped(event.Raw__c);
-                    Event.Feature featureEvent = new Event.Feature(parsed);
+                    LDEvent.Feature featureEvent = new LDEvent.Feature(parsed);
                     processor.processFeatureEvent(featureEvent);
                 }
                 when else {

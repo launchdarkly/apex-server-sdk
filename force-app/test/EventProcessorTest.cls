@@ -10,7 +10,7 @@ private class EventProcessorTest {
         LDValue default2 = LDValue.of('default2');
         LDValue default3 = LDValue.of('default3');
 
-        Event.Feature event1 = new Event.Feature(
+        LDEvent.Feature event1 = new LDEvent.Feature(
             'key1', // key
             user, // user
             11, // version
@@ -27,7 +27,7 @@ private class EventProcessorTest {
             false // allAttributesPrivate
         );
 
-        Event.Feature event2 = new Event.Feature(
+        LDEvent.Feature event2 = new LDEvent.Feature(
             'key1', // key
             user, // user
             11, // version
@@ -44,7 +44,7 @@ private class EventProcessorTest {
             false // allAttributesPrivate
         );
 
-        Event.Feature event3 = new Event.Feature(
+        LDEvent.Feature event3 = new LDEvent.Feature(
             'key2', // key
             user, // user
             22, // version
@@ -61,7 +61,7 @@ private class EventProcessorTest {
             false // allAttributesPrivate
         );
 
-        Event.Feature event4 = new Event.Feature(
+        LDEvent.Feature event4 = new LDEvent.Feature(
             'key1', // key
             user, // user
             11, // version
@@ -78,7 +78,7 @@ private class EventProcessorTest {
             false // allAttributesPrivate
         );
 
-        Event.Feature event5 = new Event.Feature(
+        LDEvent.Feature event5 = new LDEvent.Feature(
             'badkey', // key
             user, // user
             null, // version
@@ -161,7 +161,7 @@ private class EventProcessorTest {
         LDUser  user  = new LDUser.Builder('abc').build();
         LDValue value = LDValue.of('value');
 
-        Event.Feature event = new Event.Feature(
+        LDEvent.Feature event = new LDEvent.Feature(
             'key1', // key
             user, // user
             11, // version
@@ -209,7 +209,7 @@ private class EventProcessorTest {
     @isTest static void eventBundleIncludesSummary() {
         EventProcessor processor = new EventProcessor(new GetTimeMock());
 
-        Event.Feature event1 = new Event.Feature(
+        LDEvent.Feature event1 = new LDEvent.Feature(
             'key1', // key
             new LDUser.Builder('abc').build(), // user
             11, // version
@@ -258,7 +258,7 @@ private class EventProcessorTest {
     @isTest static void trackFeatureEventIncluded() {
         EventProcessor processor = new EventProcessor(new GetTimeMock());
 
-        Event.Feature event1 = new Event.Feature(
+        LDEvent.Feature event1 = new LDEvent.Feature(
             'key1', // key
             new LDUser.Builder('abc').build(), // user
             11, // version

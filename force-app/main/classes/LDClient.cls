@@ -142,7 +142,7 @@ public class LDClient {
             return;
         }
 
-        this.eventSink.sinkIdentify(new Event.Identify(user, this.getTime.now(), config.getAllAttributesPrivate()));
+        this.eventSink.sinkIdentify(new LDEvent.Identify(user, this.getTime.now(), config.getAllAttributesPrivate()));
     }
 
     public void track(LDUser user, String key, Double optionalMetric, LDValue optionalValue) {
@@ -150,7 +150,7 @@ public class LDClient {
             return;
         }
 
-        this.eventSink.sinkCustom(new Event.Custom(user, key, optionalMetric, optionalValue, this.getTime.now(), config.getAllAttributesPrivate()));
+        this.eventSink.sinkCustom(new LDEvent.Custom(user, key, optionalMetric, optionalValue, this.getTime.now(), config.getAllAttributesPrivate()));
     }
 
     public void alias(LDUser currentUser, LDUser previousUser) {
@@ -160,7 +160,7 @@ public class LDClient {
             return;
         }
 
-        this.eventSink.sinkAlias(new Event.Alias(currentUser, previousUser, this.getTime.now()));
+        this.eventSink.sinkAlias(new LDEvent.Alias(currentUser, previousUser, this.getTime.now()));
     }
 
     private Evaluator.EvalResult evaluateInternal(
@@ -179,7 +179,7 @@ public class LDClient {
                 reason = EvaluationReason.error(EvaluationReason.ErrorKind.FLAG_NOT_FOUND);
             }
 
-            Event.Feature event = new Event.Feature(
+            LDEvent.Feature event = new LDEvent.Feature(
                 featureKey, // key
                 user, // user
                 null, // version
@@ -208,7 +208,7 @@ public class LDClient {
                 reason = EvaluationReason.error(EvaluationReason.ErrorKind.USER_NOT_SPECIFIED);
             }
 
-            Event.Feature event = new Event.Feature(
+            LDEvent.Feature event = new LDEvent.Feature(
                 featureKey, // key
                 user, // user
                 null, // version
@@ -245,7 +245,7 @@ public class LDClient {
             reason = evalResult.getReason();
         }
 
-        Event.Feature event = new Event.Feature(
+        LDEvent.Feature event = new LDEvent.Feature(
             featureKey, // key
             user, // user
             flag.getVersion(), // version
@@ -264,7 +264,7 @@ public class LDClient {
 
         this.eventSink.sinkFeature(event);
 
-        for (Event.Feature prereqEvent : evalResult.getPrerequisiteEvents()) {
+        for (LDEvent.Feature prereqEvent : evalResult.getPrerequisiteEvents()) {
             this.eventSink.sinkFeature(prereqEvent);
         }
 

@@ -7,19 +7,19 @@ public class EventSink implements EventSinkInterface {
         this.maxEvents = maxEvents;
     }
 
-    public void sinkIdentify(Event.Identify event) {
+    public void sinkIdentify(LDEvent.Identify event) {
         this.sinkGeneric('identify', JSON.serialize(event.toGeneric()));
     }
 
-    public void sinkCustom(Event.Custom event) {
+    public void sinkCustom(LDEvent.Custom event) {
         this.sinkGeneric('custom', JSON.serialize(event.toGeneric()));
     }
 
-    public void sinkFeature(Event.Feature event) {
+    public void sinkFeature(LDEvent.Feature event) {
         this.sinkGeneric('feature', JSON.serialize(event.toGeneric()));
     }
 
-    public void sinkAlias(Event.Alias event) {
+    public void sinkAlias(LDEvent.Alias event) {
         this.sinkGeneric('alias', JSON.serialize(event.toGeneric()));
     }
 
