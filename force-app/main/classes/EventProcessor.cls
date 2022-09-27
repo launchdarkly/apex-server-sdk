@@ -49,7 +49,7 @@ public class EventProcessor {
         this.events           = new List<Object>();
     }
 
-    private String makeSummaryKey(Event.Feature event) {
+    private String makeSummaryKey(LDEvent.Feature event) {
         String key = '';
 
         Integer variation = event.getVariation();
@@ -67,7 +67,7 @@ public class EventProcessor {
         return key;
     }
 
-    public void summarizeFeatureEvent(Event.Feature event) {
+    public void summarizeFeatureEvent(LDEvent.Feature event) {
         if (this.summaryStartTime == null) {
             this.summaryStartTime = this.getTime.now();
         }
@@ -95,7 +95,7 @@ public class EventProcessor {
         counterContext.increment();
     }
 
-    public void processFeatureEvent(Event.Feature event) {
+    public void processFeatureEvent(LDEvent.Feature event) {
         this.summarizeFeatureEvent(event);
 
         if (event.getTrackEvents()) {

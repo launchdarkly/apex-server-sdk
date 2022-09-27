@@ -1,9 +1,9 @@
 public interface EventSinkInterface {
-    void sinkIdentify(Event.Identify event);
+    void sinkIdentify(LDEvent.Identify event);
 
-    void sinkCustom(Event.Custom event);
+    void sinkCustom(LDEvent.Custom event);
 
-    void sinkFeature(Event.Feature event);
+    void sinkFeature(LDEvent.Feature event);
 
-    void sinkAlias(Event.Alias event);
+    void sinkAlias(LDEvent.Alias event);
 }

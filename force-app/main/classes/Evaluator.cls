@@ -3,20 +3,20 @@ public class Evaluator {
         private final LDValue             value;
         private final Integer             variationIndex;
         private final EvaluationReason    reason;
-        private       List<Event.Feature> prerequisiteEvents;
+        private       List<LDEvent.Feature> prerequisiteEvents;
 
         public EvalResult(LDValue value, Integer variationIndex, EvaluationReason reason) {
             this.value              = value;
             this.variationIndex     = variationIndex;
             this.reason             = reason;
-            this.prerequisiteEvents = new List<Event.Feature>();
+            this.prerequisiteEvents = new List<LDEvent.Feature>();
         }
 
         public EvalResult(EvaluationReason.ErrorKind errorKind) {
             this.value              = null;
             this.variationIndex     = null;
             this.reason             = EvaluationReason.error(errorKind);
-            this.prerequisiteEvents = new List<Event.Feature>();
+            this.prerequisiteEvents = new List<LDEvent.Feature>();
         }
 
         public LDValue getValue() {
@@ -31,11 +31,11 @@ public class Evaluator {
             return this.reason;
         }
 
-        public List<Event.Feature> getPrerequisiteEvents() {
+        public List<LDEvent.Feature> getPrerequisiteEvents() {
             return this.prerequisiteEvents;
         }
 
-        public void setPrerequisiteEvents(List<Event.Feature> prerequisiteEvents) {
+        public void setPrerequisiteEvents(List<LDEvent.Feature> prerequisiteEvents) {
             this.prerequisiteEvents = prerequisiteEvents;
         }
     }
@@ -49,7 +49,7 @@ public class Evaluator {
     }
 
     public EvalResult evaluate(DataModel.Flag flag, LDUser user, Boolean includeReasonInEvents) {
-        List<Event.Feature> events = new List<Event.Feature>();
+        List<LDEvent.Feature> events = new List<LDEvent.Feature>();
 
         EvalResult result = this.evaluateInternal(flag, user, events, includeReasonInEvents);
 
@@ -61,7 +61,7 @@ public class Evaluator {
     private EvalResult evaluateInternal(
         DataModel.Flag      flag,
         LDUser              user,
-        List<Event.Feature> eventsOut,
+        List<LDEvent.Feature> eventsOut,
         Boolean             includeReasonInEvents
     ) {
         if (!flag.isOn()) {
@@ -165,7 +165,7 @@ public class Evaluator {
     private EvaluationReason checkPrerequisites(
         DataModel.Flag      flag,
         LDUser              user,
-        List<Event.Feature> eventsOut,
+        List<LDEvent.Feature> eventsOut,
         Boolean             includeReasonInEvents
     ) {
         for (DataModel.Prerequisite prereq : flag.getPrerequisites()) {
@@ -191,7 +191,7 @@ public class Evaluator {
                     reason = prereqEvalResult.getReason();
                 }
 
-                Event.Feature event = new Event.Feature(
+                LDEvent.Feature event = new LDEvent.Feature(
                     prereq.getKey(), // key
                     user, // user
                     prereqFeatureFlag.getVersion(), // version

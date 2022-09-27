@@ -1,4 +1,4 @@
-public class Event {
+public class LDEvent {
     public static String userToContextKind(LDUser user) {
         System.assertNotEquals(user, null);
 
@@ -49,9 +49,9 @@ public class Event {
             System.assertNotEquals(now, null);
 
             this.key                 = currentUser.getKey();
-            this.contextKind         = Event.userToContextKind(currentUser);
+            this.contextKind         = LDEvent.userToContextKind(currentUser);
             this.previousKey         = previousUser.getKey();
-            this.previousContextKind = Event.userToContextKind(previousUser);
+            this.previousContextKind = LDEvent.userToContextKind(previousUser);
             this.now                 = now;
         }
 
@@ -97,7 +97,7 @@ public class Event {
             this.now            = now;
 
             if (user.getAnonymous()) {
-                this.contextKind = Event.userToContextKind(user);
+                this.contextKind = LDEvent.userToContextKind(user);
             }
         }
 
@@ -177,7 +177,7 @@ public class Event {
                 this.user = user.toGeneric(allAttributesPrivate);
 
                 if (user.getAnonymous()) {
-                    this.contextKind = Event.userToContextKind(user);
+                    this.contextKind = LDEvent.userToContextKind(user);
                 }
             }
             
