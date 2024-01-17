@@ -309,4 +309,43 @@ private class EvaluatorTest {
     System.assertEquals(0, v3.variationIndex);
     System.assertEquals(false, v3.inExperiment);
   }
+
+  @isTest
+  static void evalResultErrorKind() {
+    Evaluator.EvalResult result = new Evaluator.EvalResult(EvaluationReason.ErrorKind.EXCEPTION_THROWN);
+
+    System.assertNotEquals(result, null);
+  }
+
+  @isTest
+  static void isNotExperimentRuleMatch() {
+    EvaluationReason reason = EvaluationReason.ruleMatch(1, '1'); //EvaluationReason.Kind.RULE_MATCH);
+    DataStoreMock store = new DataStoreMock();
+
+    DataModel.Flag flag = new DataModel.Flag();
+    flag.fieldOn = false;
+    flag.variations.add(LDValue.of(true));
+
+    Evaluator evaluator = new Evaluator(store, new GetTimeMock());
+
+    Boolean isExperiment = evaluator.isExperiment(flag, reason);
+
+    System.assertEquals(isExperiment, false);
+  }
+
+  @isTest
+  static void isExperimentRuleMatch() {
+    EvaluationReason reason = EvaluationReason.ruleMatch(1, '1', true);
+    DataStoreMock store = new DataStoreMock();
+
+    DataModel.Flag flag = new DataModel.Flag();
+    flag.fieldOn = false;
+    flag.variations.add(LDValue.of(true));
+
+    Evaluator evaluator = new Evaluator(store, new GetTimeMock());
+
+    Boolean isExperiment = evaluator.isExperiment(flag, reason);
+
+    System.assertEquals(isExperiment, true);
+  }
 }
