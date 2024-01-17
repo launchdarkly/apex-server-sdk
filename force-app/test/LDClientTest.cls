@@ -1,131 +1,280 @@
 @isTest
 private class LDClientTest {
-    @isTest static void basicVariation() {
-        String raw =
-            '{"flags":' +
-                '{' +
-                    '"hello": ' +
-                    '{' +
-                        '"version": 52, ' +
-                        '"key": "hello", ' +
-                        '"on": false, ' +
-                        '"offVariation": 0, ' +
-                        '"salt": "abc123", ' +
-                        '"fallthrough": ' +
-                        '{' +
-                            '"variation": 0' +
-                        '},' +
-                        '"variations": [true]' +
-                    '}' +
-                '}' +
-            '}';
+  static string rawStringBuilder(Object obj) {
+    return '{"flags":' +
+      '{' +
+      '"hello": ' +
+      '{' +
+      '"version": 52, ' +
+      '"key": "hello", ' +
+      '"on": false, ' +
+      '"offVariation": 0, ' +
+      '"salt": "abc123", ' +
+      '"fallthrough": ' +
+      '{' +
+      '"variation": 0' +
+      '},' +
+      '"variations": [' +
+      obj +
+      ']' +
+      '}' +
+      '}' +
+      '}';
+  }
 
-        DataStore store = new DataStore();
-        store.putAll((Map<String, Object>)JSON.deserializeUntyped(raw));
+  @isTest
+  static void basicVariation() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(true)));
 
-        LDConfig config = new LDConfig.Builder().build();
-        LDUser   user   = new LDUser.Builder('user-key').build();
-        LDClient client = new LDClient(config);
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
 
-        Boolean result1 = client.boolVariation(user, 'hello', false);
-        System.assertEquals(result1, true);
+    Boolean result1 = client.boolVariation(user, 'hello', false);
+    System.assertEquals(result1, true);
 
-        Boolean result2 = client.boolVariation(user, 'fake', false);
-        System.assertEquals(result2, false);
-    }
+    Boolean result2 = client.boolVariation(user, 'fake', false);
+    System.assertEquals(result2, false);
+  }
 
-    @isTest static void allFlagsEmptyStore() {
-        LDConfig config = new LDConfig.Builder().build();
-        LDUser   user   = new LDUser.Builder('user-key').build();
-        LDClient client = new LDClient(config);
+  @isTest
+  static void basicVariationWithDetail() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(true)));
 
-        Map<String, LDValue> result = client.allFlags(user);
-        System.assertEquals(result.size(), 0);
-    }
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
 
-    @isTest static void identify() {
-        LDConfig config = new LDConfig.Builder().build();
-        LDUser   user   = new LDUser.Builder('user-key').build();
-        LDClient client = new LDClient(config);
+    Boolean result1 = client.boolVariation(user, 'hello', false, detail);
 
-        client.getTime = new GetTimeMock();
+    System.assertEquals(result1, true);
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
+    System.assertEquals(detail.getVariationIndex(), 0);
+  }
 
-        client.identify(user);
+  @isTest
+  static void intVariation() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(1)));
 
-        List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
 
-        String expected = '{"creationDate":1,"user":{"key":"user-key"},"key":"user-key","kind":"identify"}';
+    Integer result1 = client.intVariation(user, 'hello', 0);
 
-        System.assertEquals(events.size(), 1);
-        System.assertEquals(events.get(0).Kind__c, 'identify');
-        System.assertEquals(events.get(0).Raw__c, expected);
-    }
+    System.assertEquals(result1, 1);
+  }
 
-    @isTest static void alias() {
-        LDConfig config       = new LDConfig.Builder().build();
-        LDUser   currentUser  = new LDUser.Builder('a').build();
-        LDUser   previousUser = new LDUser.Builder('b').build();
-        LDClient client       = new LDClient(config);
+  @isTest
+  static void intVariationWithDetail() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(1)));
 
-        client.getTime = new GetTimeMock();
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
 
-        client.alias(currentUser, previousUser);
+    Integer result1 = client.intVariation(user, 'hello', 0, detail);
 
-        List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
+    System.assertEquals(result1, 1);
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
+  }
 
-        String expected =
-              '{'
-            + '"creationDate":1,'
-            + '"key":"a",' 
-            + '"contextKind": "user",'
-            + '"previousKey":"b",'
-            + '"previousContextKind": "user",'
-            + '"kind":"alias"'
-            + '}';
+  @isTest
+  static void doubleVariation() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(1)));
 
-        System.assertEquals(events.size(), 1);
-        System.assertEquals(events.get(0).Kind__c, 'alias');
-        System.assertEquals(
-            JSON.deserializeUntyped(events.get(0).Raw__c),
-            JSON.deserializeUntyped(expected)
-        );
-    }
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
 
-    @isTest static void trackMinimal() {
-        LDConfig config = new LDConfig.Builder().build();
-        LDUser   user   = new LDUser.Builder('user-key').build();
-        LDClient client = new LDClient(config);
-        
-        client.getTime = new GetTimeMock();
+    Double result1 = client.doubleVariation(user, 'hello', 0);
 
-        client.track(user, 'abc', null, null);
+    System.assertEquals(result1, 1);
+  }
 
-        List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
+  @isTest
+  static void doubleVariationWithDetail() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(1)));
 
-        String expected = '{"creationDate":1,"user":{"key":"user-key"},"key":"abc","kind":"custom"}';
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
 
-        System.assertEquals(events.size(), 1);
-        System.assertEquals(events.get(0).Kind__c, 'custom');
-        System.assertEquals(events.get(0).Raw__c, expected);
-    }
+    Double result1 = client.doubleVariation(user, 'hello', 0, detail);
 
-    @isTest static void trackFull() {
-        LDConfig config = new LDConfig.Builder().build();
-        LDUser   user   = new LDUser.Builder('user-key').build();
-        LDClient client = new LDClient(config);
-        LDValue  value  = new LDValueObject.Builder().set('a', LDValue.of(true)).build();
-        
-        client.getTime = new GetTimeMock();
+    System.assertEquals(result1, 1);
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
+  }
 
-        client.track(user, '123', (Double)52.1, value);
+  @isTest
+  static void stringVariation() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder('"' + 1 + '"')));
 
-        List<EventData__c> events = [select Kind__c, Raw__c from EventData__C];
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
 
-        String expected = '{"creationDate":1,"data":{"a":true},"metricValue":52.1,'
-            + '"user":{"key":"user-key"},"key":"123","kind":"custom"}';
+    String result1 = client.stringVariation(user, 'hello', '1');
 
-        System.assertEquals(events.size(), 1);
-        System.assertEquals(events.get(0).Kind__c, 'custom');
-        System.assertEquals(events.get(0).Raw__c, expected);
-    }
+    System.assertEquals(result1, '1');
+  }
+
+  @isTest
+  static void stringVariationWithDetail() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder('"' + 1 + '"')));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
+
+    String result1 = client.stringVariation(user, 'hello', '0', detail);
+
+    System.assertEquals(result1, '1');
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
+  }
+
+  @isTest
+  static void jsonVariation() {
+    Integer x = 7;
+    LDValue value = LDValue.of(x);
+
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(JSOn.serialize(value))));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDValue result1 = client.jsonVariation(user, 'hello', value);
+
+    System.assertEquals(result1.intValue(), 0);
+  }
+
+  @isTest
+  static void jsonVariationWithDetail() {
+    Integer x = 7;
+    LDValue value = LDValue.of(x);
+
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(JSOn.serialize(value))));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
+
+    LDValue result1 = client.jsonVariation(user, 'hello', value, detail);
+
+    System.assertEquals(result1.intValue(), 0);
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
+  }
+
+  @isTest
+  static void allFlagsEmptyStore() {
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+
+    Map<String, LDValue> result = client.allFlags(user);
+    System.assertEquals(result.size(), 0);
+  }
+
+  @isTest
+  static void identify() {
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+
+    client.getTime = new GetTimeMock();
+
+    client.identify(user);
+
+    List<EventData__c> events = [SELECT Kind__c, Raw__c FROM EventData__C];
+
+    String expected = '{"creationDate":1,"user":{"key":"user-key"},"key":"user-key","kind":"identify"}';
+
+    System.assertEquals(events.size(), 1);
+    System.assertEquals(events.get(0).Kind__c, 'identify');
+    System.assertEquals(events.get(0).Raw__c, expected);
+  }
+
+  @isTest
+  static void alias() {
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser currentUser = new LDUser.Builder('a').build();
+    LDUser previousUser = new LDUser.Builder('b').build();
+    LDClient client = new LDClient(config);
+
+    client.getTime = new GetTimeMock();
+
+    client.alias(currentUser, previousUser);
+
+    List<EventData__c> events = [SELECT Kind__c, Raw__c FROM EventData__C];
+
+    String expected =
+      '{' +
+      '"creationDate":1,' +
+      '"key":"a",' +
+      '"contextKind": "user",' +
+      '"previousKey":"b",' +
+      '"previousContextKind": "user",' +
+      '"kind":"alias"' +
+      '}';
+
+    System.assertEquals(events.size(), 1);
+    System.assertEquals(events.get(0).Kind__c, 'alias');
+    System.assertEquals(JSON.deserializeUntyped(events.get(0).Raw__c), JSON.deserializeUntyped(expected));
+  }
+
+  @isTest
+  static void trackMinimal() {
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+
+    client.getTime = new GetTimeMock();
+
+    client.track(user, 'abc', null, null);
+
+    List<EventData__c> events = [SELECT Kind__c, Raw__c FROM EventData__C];
+
+    String expected = '{"creationDate":1,"user":{"key":"user-key"},"key":"abc","kind":"custom"}';
+
+    System.assertEquals(events.size(), 1);
+    System.assertEquals(events.get(0).Kind__c, 'custom');
+    System.assertEquals(events.get(0).Raw__c, expected);
+  }
+
+  @isTest
+  static void trackFull() {
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDValue value = new LDValueObject.Builder().set('a', LDValue.of(true)).build();
+
+    client.getTime = new GetTimeMock();
+
+    client.track(user, '123', (Double) 52.1, value);
+
+    List<EventData__c> events = [SELECT Kind__c, Raw__c FROM EventData__C];
+
+    String expected =
+      '{"creationDate":1,"data":{"a":true},"metricValue":52.1,' +
+      '"user":{"key":"user-key"},"key":"123","kind":"custom"}';
+
+    System.assertEquals(events.size(), 1);
+    System.assertEquals(events.get(0).Kind__c, 'custom');
+    System.assertEquals(events.get(0).Raw__c, expected);
+  }
 }
