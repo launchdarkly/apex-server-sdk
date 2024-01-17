@@ -1,9 +1,7 @@
 @isTest
 private class LDClientTest {
-  @isTest
-  static void basicVariation() {
-    String raw =
-      '{"flags":' +
+  static string rawStringBuilder(Object obj) {
+    return '{"flags":' +
       '{' +
       '"hello": ' +
       '{' +
@@ -16,13 +14,18 @@ private class LDClientTest {
       '{' +
       '"variation": 0' +
       '},' +
-      '"variations": [true]' +
+      '"variations": [' +
+      obj +
+      ']' +
       '}' +
       '}' +
       '}';
+  }
 
+  @isTest
+  static void basicVariation() {
     DataStore store = new DataStore();
-    store.putAll((Map<String, Object>) JSON.deserializeUntyped(raw));
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(true)));
 
     LDConfig config = new LDConfig.Builder().build();
     LDUser user = new LDUser.Builder('user-key').build();
@@ -33,6 +36,148 @@ private class LDClientTest {
 
     Boolean result2 = client.boolVariation(user, 'fake', false);
     System.assertEquals(result2, false);
+  }
+
+  @isTest
+  static void basicVariationWithDetail() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(true)));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
+
+    Boolean result1 = client.boolVariation(user, 'hello', false, detail);
+
+    System.assertEquals(result1, true);
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
+    System.assertEquals(detail.getVariationIndex(), 0);
+  }
+
+  @isTest
+  static void intVariation() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(1)));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+
+    Integer result1 = client.intVariation(user, 'hello', 0);
+
+    System.assertEquals(result1, 1);
+  }
+
+  @isTest
+  static void intVariationWithDetail() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(1)));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
+
+    Integer result1 = client.intVariation(user, 'hello', 0, detail);
+
+    System.assertEquals(result1, 1);
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
+  }
+
+  @isTest
+  static void doubleVariation() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(1)));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+
+    Double result1 = client.doubleVariation(user, 'hello', 0);
+
+    System.assertEquals(result1, 1);
+  }
+
+  @isTest
+  static void doubleVariationWithDetail() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(1)));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
+
+    Double result1 = client.doubleVariation(user, 'hello', 0, detail);
+
+    System.assertEquals(result1, 1);
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
+  }
+
+  @isTest
+  static void stringVariation() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder('"' + 1 + '"')));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+
+    String result1 = client.stringVariation(user, 'hello', '1');
+
+    System.assertEquals(result1, '1');
+  }
+
+  @isTest
+  static void stringVariationWithDetail() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder('"' + 1 + '"')));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
+
+    String result1 = client.stringVariation(user, 'hello', '0', detail);
+
+    System.assertEquals(result1, '1');
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
+  }
+
+  @isTest
+  static void jsonVariation() {
+    Integer x = 7;
+    LDValue value = LDValue.of(x);
+
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(JSOn.serialize(value))));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDValue result1 = client.jsonVariation(user, 'hello', value);
+
+    System.assertEquals(result1.intValue(), 0);
+  }
+
+  @isTest
+  static void jsonVariationWithDetail() {
+    Integer x = 7;
+    LDValue value = LDValue.of(x);
+
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(JSOn.serialize(value))));
+
+    LDConfig config = new LDConfig.Builder().build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+    LDClient.EvaluationDetail detail = new LDClient.EvaluationDetail();
+
+    LDValue result1 = client.jsonVariation(user, 'hello', value, detail);
+
+    System.assertEquals(result1.intValue(), 0);
+    System.assertEquals(detail.getReason().getKind(), EvaluationReason.Kind.OFF);
   }
 
   @isTest
