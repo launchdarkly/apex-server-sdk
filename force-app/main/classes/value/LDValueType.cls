@@ -1,8 +1,8 @@
 public enum LDValueType {
-    CNULL,
-    CBOOLEAN,
-    CNUMBER,
-    CSTRING,
-    CARRAY,
-    COBJECT
+  CNULL,
+  CBOOLEAN,
+  CNUMBER,
+  CSTRING,
+  CARRAY,
+  COBJECT
 }

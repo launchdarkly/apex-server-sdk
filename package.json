@@ -1,0 +1,10 @@
+{
+  "name": "launch-darkly",
+  "version": "1.0.0",
+  "description": "Launch Darkly",
+  "homepage": "",
+  "devDependencies": {
+    "prettier": "^3.1.0",
+    "prettier-plugin-apex": "^2.0.1"
+  }
+}
