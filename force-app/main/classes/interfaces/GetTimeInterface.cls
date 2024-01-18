@@ -1,3 +1,3 @@
 public interface GetTimeInterface {
-    Long now();
+  Long now();
 }

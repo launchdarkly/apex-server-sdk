@@ -1,7 +1,7 @@
 public interface DataStoreInterface {
-    DataModel.Flag getFlag(String key);
+  DataModel.Flag getFlag(String key);
 
-    DataModel.Segment getSegment(String key);
+  DataModel.Segment getSegment(String key);
 
-    Map<String, DataModel.Flag> allFlags();
+  Map<String, DataModel.Flag> allFlags();
 }

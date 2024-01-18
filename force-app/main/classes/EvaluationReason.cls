@@ -1,219 +1,238 @@
 public class EvaluationReason {
-    public enum Kind {
-        OFF,
-        FALLTHROUGH,
-        TARGET_MATCH,
-        RULE_MATCH,
-        PREREQUISITE_FAILED,
-        ERROR
+  public enum Kind {
+    OFF,
+    FALLTHROUGH,
+    TARGET_MATCH,
+    RULE_MATCH,
+    PREREQUISITE_FAILED,
+    ERROR
+  }
+
+  public enum ErrorKind {
+    CLIENT_NOT_READY,
+    FLAG_NOT_FOUND,
+    MALFORMED_FLAG,
+    USER_NOT_SPECIFIED,
+    WRONG_TYPE,
+    EXCEPTION_THROWN
+  }
+
+  private final Kind kind;
+  private final Integer ruleIndex;
+  private final String ruleId;
+  private final String prerequisiteKey;
+  private final Boolean inExperiment;
+  private final ErrorKind errorKind;
+
+  private static final EvaluationReason OFF_INSTANCE = new EvaluationReason(Kind.OFF);
+  private static final EvaluationReason FALLTHROUGH_INSTANCE_IN_EXPERIMENT = new EvaluationReason(
+    Kind.FALLTHROUGH,
+    null,
+    null,
+    null,
+    true,
+    null
+  );
+  private static final EvaluationReason FALLTHROUGH_INSTANCE_NOT_IN_EXPERIMENT = new EvaluationReason(
+    Kind.FALLTHROUGH,
+    null,
+    null,
+    null,
+    false,
+    null
+  );
+  private static final EvaluationReason TARGET_MATCH_INSTANCE = new EvaluationReason(Kind.TARGET_MATCH);
+  private static final EvaluationReason ERROR_CLIENT_NOT_READY = new EvaluationReason(ErrorKind.CLIENT_NOT_READY);
+  private static final EvaluationReason ERROR_FLAG_NOT_FOUND = new EvaluationReason(ErrorKind.FLAG_NOT_FOUND);
+  private static final EvaluationReason ERROR_MALFORMED_FLAG = new EvaluationReason(ErrorKind.MALFORMED_FLAG);
+  private static final EvaluationReason ERROR_USER_NOT_SPECIFIED = new EvaluationReason(ErrorKind.USER_NOT_SPECIFIED);
+  private static final EvaluationReason ERROR_WRONG_TYPE = new EvaluationReason(ErrorKind.WRONG_TYPE);
+  private static final EvaluationReason ERROR_EXCEPTION_THROWN = new EvaluationReason(ErrorKind.EXCEPTION_THROWN);
+
+  private EvaluationReason(
+    Kind kind,
+    Integer ruleIndex,
+    String ruleId,
+    String prerequisiteKey,
+    Boolean inExperiment,
+    ErrorKind errorKind
+  ) {
+    this.kind = kind;
+    this.ruleIndex = ruleIndex;
+    this.ruleId = ruleId;
+    this.prerequisiteKey = prerequisiteKey;
+    this.inExperiment = inExperiment;
+    this.errorKind = errorKind;
+  }
+
+  private EvaluationReason(Kind kind) {
+    this.kind = kind;
+    this.ruleIndex = null;
+    this.ruleId = null;
+    this.prerequisiteKey = null;
+    this.inExperiment = false;
+    this.errorKind = null;
+  }
+
+  private EvaluationReason(ErrorKind errorKind) {
+    this.kind = EvaluationReason.Kind.ERROR;
+    this.ruleIndex = null;
+    this.ruleId = null;
+    this.prerequisiteKey = null;
+    this.inExperiment = false;
+    this.errorKind = errorKind;
+  }
+
+  public static EvaluationReason off() {
+    return OFF_INSTANCE;
+  }
+
+  public static EvaluationReason fallthrough() {
+    return fallthrough(false);
+  }
+
+  public static EvaluationReason fallthrough(Boolean inExperiment) {
+    if (inExperiment) {
+      return FALLTHROUGH_INSTANCE_IN_EXPERIMENT;
+    } else {
+      return FALLTHROUGH_INSTANCE_NOT_IN_EXPERIMENT;
+    }
+  }
+
+  public static EvaluationReason targetMatch() {
+    return TARGET_MATCH_INSTANCE;
+  }
+
+  public static EvaluationReason exception() {
+    return ERROR_EXCEPTION_THROWN;
+  }
+
+  public static EvaluationReason prerequisiteFailed(String prerequisiteKey) {
+    return new EvaluationReason(Kind.PREREQUISITE_FAILED, null, null, prerequisiteKey, false, null);
+  }
+
+  public static EvaluationReason ruleMatch(Integer ruleIndex, String ruleId) {
+    return ruleMatch(ruleIndex, ruleId, false);
+  }
+
+  public static EvaluationReason ruleMatch(Integer ruleIndex, String ruleId, Boolean inExperiment) {
+    return new EvaluationReason(Kind.RULE_MATCH, ruleIndex, ruleId, null, inExperiment, null);
+  }
+
+  public static EvaluationReason error(ErrorKind errorKind) {
+    switch on errorKind {
+      when CLIENT_NOT_READY {
+        return ERROR_CLIENT_NOT_READY;
+      }
+      when FLAG_NOT_FOUND {
+        return ERROR_FLAG_NOT_FOUND;
+      }
+      when MALFORMED_FLAG {
+        return ERROR_MALFORMED_FLAG;
+      }
+      when USER_NOT_SPECIFIED {
+        return ERROR_USER_NOT_SPECIFIED;
+      }
+      when WRONG_TYPE {
+        return ERROR_WRONG_TYPE;
+      }
     }
 
-    public enum ErrorKind {
-        CLIENT_NOT_READY,
-        FLAG_NOT_FOUND,
-        MALFORMED_FLAG,
-        USER_NOT_SPECIFIED,
-        WRONG_TYPE,
-        EXCEPTION_THROWN
+    return new EvaluationReason(errorKind);
+  }
+
+  public Kind getKind() {
+    return this.kind;
+  }
+
+  public Boolean isInExperiment() {
+    return this.inExperiment;
+  }
+
+  public Integer getRuleIndex() {
+    return this.ruleIndex;
+  }
+
+  public String kindToString(Kind kind) {
+    switch on kind {
+      when OFF {
+        return 'OFF';
+      }
+      when FALLTHROUGH {
+        return 'FALLTHROUGH';
+      }
+      when TARGET_MATCH {
+        return 'TARGET_MATCH';
+      }
+      when RULE_MATCH {
+        return 'RULE_MATCH';
+      }
+      when PREREQUISITE_FAILED {
+        return 'PREREQUISITE_FAILED';
+      }
+      when ERROR {
+        return 'ERROR';
+      }
     }
 
-    private final Kind      kind;
-    private final Integer   ruleIndex;
-    private final String    ruleId;
-    private final String    prerequisiteKey;
-    private final Boolean   inExperiment;
-    private final ErrorKind errorKind;
+    return 'unknown';
+  }
 
-    private static final EvaluationReason OFF_INSTANCE                           = new EvaluationReason(Kind.OFF);
-    private static final EvaluationReason FALLTHROUGH_INSTANCE_IN_EXPERIMENT     = new EvaluationReason(Kind.FALLTHROUGH, null, null, null, true, null);
-    private static final EvaluationReason FALLTHROUGH_INSTANCE_NOT_IN_EXPERIMENT = new EvaluationReason(Kind.FALLTHROUGH, null, null, null, false, null);
-    private static final EvaluationReason TARGET_MATCH_INSTANCE                  = new EvaluationReason(Kind.TARGET_MATCH);
-    private static final EvaluationReason ERROR_CLIENT_NOT_READY                 = new EvaluationReason(ErrorKind.CLIENT_NOT_READY);
-    private static final EvaluationReason ERROR_FLAG_NOT_FOUND                   = new EvaluationReason(ErrorKind.FLAG_NOT_FOUND);
-    private static final EvaluationReason ERROR_MALFORMED_FLAG                   = new EvaluationReason(ErrorKind.MALFORMED_FLAG);
-    private static final EvaluationReason ERROR_USER_NOT_SPECIFIED               = new EvaluationReason(ErrorKind.USER_NOT_SPECIFIED);
-    private static final EvaluationReason ERROR_WRONG_TYPE                       = new EvaluationReason(ErrorKind.WRONG_TYPE);
-    private static final EvaluationReason ERROR_EXCEPTION_THROWN                 = new EvaluationReason(ErrorKind.EXCEPTION_THROWN);
-
-    private EvaluationReason(Kind kind, Integer ruleIndex, String ruleId,
-        String prerequisiteKey, Boolean inExperiment, ErrorKind errorKind)
-    {
-        this.kind            = kind;
-        this.ruleIndex       = ruleIndex;
-        this.ruleId          = ruleId;
-        this.prerequisiteKey = prerequisiteKey;
-        this.inExperiment    = inExperiment;
-        this.errorKind       = errorKind;
+  public String errorKindToString(ErrorKind errorKind) {
+    switch on errorKind {
+      when CLIENT_NOT_READY {
+        return 'CLIENT_NOT_READY';
+      }
+      when FLAG_NOT_FOUND {
+        return 'FLAG_NOT_FOUND';
+      }
+      when MALFORMED_FLAG {
+        return 'MALFORMED_FLAG';
+      }
+      when USER_NOT_SPECIFIED {
+        return 'USER_NOT_SPECIFIED';
+      }
+      when WRONG_TYPE {
+        return 'WRONG_TYPE';
+      }
+      when EXCEPTION_THROWN {
+        return 'EXCEPTION_THROWN';
+      }
     }
 
-    private EvaluationReason(Kind kind) {
-        this.kind            = kind;
-        this.ruleIndex       = null;
-        this.ruleId          = null;
-        this.prerequisiteKey = null;
-        this.inExperiment    = false;
-        this.errorKind       = null;
-    }
+    return 'unknown';
+  }
 
-    private EvaluationReason(ErrorKind errorKind) {
-        this.kind            = EvaluationReason.Kind.ERROR;
-        this.ruleIndex       = null;
-        this.ruleId          = null;
-        this.prerequisiteKey = null;
-        this.inExperiment    = false;
-        this.errorKind       = errorKind;
-    }
+  public Object toGeneric() {
+    Map<String, Object> rep = new Map<String, Object>();
 
-    public static EvaluationReason off() {
-        return OFF_INSTANCE;
-    }
+    rep.put('kind', this.kindToString(this.kind));
 
-    public static EvaluationReason fallthrough() {
-        return fallthrough(false);
-    }
+    switch on this.kind {
+      when ERROR {
+        rep.put('errorKind', this.errorKindToString(this.errorKind));
+      }
+      when PREREQUISITE_FAILED {
+        rep.put('prerequisiteKey', this.prerequisiteKey);
+      }
+      when RULE_MATCH {
+        rep.put('ruleIndex', this.ruleIndex);
+        rep.put('ruleId', this.ruleId);
 
-    public static EvaluationReason fallthrough(Boolean inExperiment) {
-        if (inExperiment) {
-            return FALLTHROUGH_INSTANCE_IN_EXPERIMENT;
-        } else {
-            return FALLTHROUGH_INSTANCE_NOT_IN_EXPERIMENT;
+        if (this.inExperiment == true) {
+          rep.put('inExperiment', true);
         }
-    }
-
-    public static EvaluationReason targetMatch() {
-        return TARGET_MATCH_INSTANCE;
-    }
-
-    public static EvaluationReason exception() {
-        return ERROR_EXCEPTION_THROWN;
-    }
-
-    public static EvaluationReason prerequisiteFailed(String prerequisiteKey) {
-        return new EvaluationReason(Kind.PREREQUISITE_FAILED, null, null, prerequisiteKey, false, null);
-    }
-
-    public static EvaluationReason ruleMatch(Integer ruleIndex, String ruleId) {
-        return ruleMatch(ruleIndex, ruleId, false);
-    }
-
-    public static EvaluationReason ruleMatch(Integer ruleIndex, String ruleId, Boolean inExperiment) {
-        return new EvaluationReason(Kind.RULE_MATCH, ruleIndex, ruleId, null, inExperiment, null);
-    }
-
-    public static EvaluationReason error(ErrorKind errorKind) {
-        switch on errorKind {
-            when CLIENT_NOT_READY {
-                return ERROR_CLIENT_NOT_READY;
-            }
-            when FLAG_NOT_FOUND {
-                return ERROR_FLAG_NOT_FOUND;
-            }
-            when MALFORMED_FLAG {
-                return ERROR_MALFORMED_FLAG;
-            }
-            when USER_NOT_SPECIFIED {
-                return ERROR_USER_NOT_SPECIFIED;
-            }
-            when WRONG_TYPE {
-                return ERROR_WRONG_TYPE;
-            }
+      }
+      when FALLTHROUGH {
+        if (this.inExperiment == true) {
+          rep.put('inExperiment', true);
         }
-
-        return new EvaluationReason(errorKind);
+      }
+      when else {
+        // nothing
+      }
     }
 
-    public Kind getKind() {
-        return this.kind;
-    }
-
-    public Boolean isInExperiment() {
-        return this.inExperiment;
-    }
-
-    public Integer getRuleIndex() {
-        return this.ruleIndex;
-    }
-
-    public String kindToString(Kind kind) {
-        switch on kind {
-            when OFF {
-                return 'OFF';
-            }
-            when FALLTHROUGH {
-                return 'FALLTHROUGH';
-            }
-            when TARGET_MATCH {
-                return 'TARGET_MATCH';
-            }
-            when RULE_MATCH {
-                return 'RULE_MATCH';
-            }
-            when PREREQUISITE_FAILED {
-                return 'PREREQUISITE_FAILED';
-            }
-            when ERROR {
-                return 'ERROR';
-            }
-        }
-
-        return 'unknown';
-    }
-
-    public String errorKindToString(ErrorKind errorKind) {
-        switch on errorKind {
-            when CLIENT_NOT_READY {
-                return 'CLIENT_NOT_READY';
-            }
-            when FLAG_NOT_FOUND {
-                return 'FLAG_NOT_FOUND';
-            }
-            when MALFORMED_FLAG {
-                return 'MALFORMED_FLAG';
-            }
-            when USER_NOT_SPECIFIED {
-                return 'USER_NOT_SPECIFIED';
-            }
-            when WRONG_TYPE {
-                return 'WRONG_TYPE';
-            }
-            when EXCEPTION_THROWN {
-                return 'EXCEPTION_THROWN';
-            }
-        }
-
-        return 'unknown';
-    }
-
-    public Object toGeneric() {
-        Map<String, Object> rep = new Map<String, Object>();
-
-        rep.put('kind', this.kindToString(this.kind));
-
-        switch on this.kind {
-            when ERROR {
-                rep.put('errorKind', this.errorKindToString(this.errorKind));
-            }
-            when PREREQUISITE_FAILED {
-                rep.put('prerequisiteKey', this.prerequisiteKey);
-            }
-            when RULE_MATCH {
-                rep.put('ruleIndex', this.ruleIndex);
-                rep.put('ruleId', this.ruleId);
-
-                if (this.inExperiment == true) {
-                    rep.put('inExperiment', true);
-                }
-            }
-            when FALLTHROUGH {
-                if (this.inExperiment == true) {
-                    rep.put('inExperiment', true);
-                }
-            }
-            when else {
-                // nothing
-            }
-        }
-
-        return (Object)rep;
-    }
+    return (Object) rep;
+  }
 }
