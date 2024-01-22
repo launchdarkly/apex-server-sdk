@@ -85,4 +85,19 @@ private class LDValueTest {
     System.assertEquals(value.equals(LDValue.of(52)), false);
     System.assertEquals(value.equals(LDValue.ofGeneric(expectedGeneric)), true);
   }
+
+  @isTest
+  static void defaultValues() {
+    String x = 'hello';
+    LDValue value = LDValue.of(x);
+
+    System.assertEquals(value.booleanValue(), false);
+    System.assertEquals(value.doubleValue(), 0);
+    System.assertEquals(value.intValue(), 0);
+    System.assertEquals(value.longValue(), 0);
+    System.assertEquals(value.size(), 0);
+    System.assertEquals(value.isInt(), false);
+    System.assertEquals(value.get('test'), null);
+    System.assertEquals(value.get(1), null);
+  }
 }

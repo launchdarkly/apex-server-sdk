@@ -1,2 +1,4 @@
 .idea/
+.sfdx
+.sf
 node_modules
