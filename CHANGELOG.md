@@ -2,6 +2,10 @@
 
 All notable changes to the LaunchDarkly Apex server-side SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.3.0] - 2024-01-23
+### Added:
+- Added additional unit tests to meet 75% minimum coverage required by Salesforce. Thanks, @estebanefi!
+
 ## [1.2.0] - 2022-09-27
 ### Fixed:
 - Fixed name collision between internal Event type and Salesforce Event type. The SDK Event type is now named LDEvent.
