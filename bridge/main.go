@@ -412,7 +412,7 @@ func (bridge *Bridge) featureLoop() error {
 			}
 
 			if pushResponse.StatusCode != 200 {
-				log.Print("push flags expected 200 got ", pushRequest)
+				log.Print("push flags expected 200 got ", pushResponse.StatusCode)
 				goto End
 			}
 

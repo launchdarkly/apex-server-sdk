@@ -7,11 +7,25 @@ workflows:
   version: 2
   all_tasks:
     jobs:
+      - formatting
       - build-bridge
       - unit-test:
           context: apex-sdk-ci
 
 jobs:
+  formatting:
+    docker:
+      - image: cimg/openjdk:17.0-node
+    steps:
+        - checkout
+        - run:
+            name: Install Prettier
+            command: npm ci
+        - run:
+            name: Check Formatting
+            command: |
+             npm run prettier:check:ci
+
   build-bridge:
     docker:
       - image: cimg/go:1.15

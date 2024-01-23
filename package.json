@@ -1,0 +1,14 @@
+{
+  "name": "launchdarkly",
+  "version": "1.0.0",
+  "description": "LaunchDarkly Apex SDK",
+  "homepage": "",
+  "devDependencies": {
+    "prettier": "^3.1.0",
+    "prettier-plugin-apex": "^2.0.1"
+  },
+  "scripts": {
+    "prettier:format": "./node_modules/.bin/prettier --write \"**/*.cls\"",
+    "prettier:check:ci": "./node_modules/.bin/prettier --check \"**/*.cls\""
+  }
+}
