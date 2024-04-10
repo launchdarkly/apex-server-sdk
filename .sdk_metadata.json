@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "sdks": {
+    "apex-server-sdk": {
+      "name": "Apex Server SDK",
+      "type": "server-side",
+      "languages": [
+        "Apex"
+      ]
+    }
+  }
+}
