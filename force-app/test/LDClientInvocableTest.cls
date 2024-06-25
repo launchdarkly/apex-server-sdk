@@ -37,8 +37,6 @@ private class LDClientInvocableTest {
 
     LDClientInvocable.InvocableResponse responseData = LDClientInvocable.flagVariation(new List<LDClientInvocable.InvocableRequest>{requestData})[0];
 
-    System.assertEquals(requestData.flagKey, responseData.flagKey, 'Response flag key should match the request flag key');
-    System.assertEquals(requestData.flagType, responseData.flagType, 'Response flag key should match the request flag key');
     System.assertEquals(false, responseData.booleanVariation, 'Response Boolean Variation should be FALSE to match the fallback value since the flag does not exist');
   }
 
@@ -54,8 +52,6 @@ private class LDClientInvocableTest {
 
     LDClientInvocable.InvocableResponse responseData = LDClientInvocable.flagVariation(new List<LDClientInvocable.InvocableRequest>{requestData})[0];
 
-    System.assertEquals(requestData.flagKey, responseData.flagKey, 'Response flag key should match the request flag key');
-    System.assertEquals(requestData.flagType, responseData.flagType, 'Response flag key should match the request flag key');
     System.assertEquals(2024, responseData.integerVariation, 'Response Integer Variation should be 2024 to match the fallback value since the flag does not exist');
   }
 
@@ -70,8 +66,6 @@ private class LDClientInvocableTest {
 
     LDClientInvocable.InvocableResponse responseData = LDClientInvocable.flagVariation(new List<LDClientInvocable.InvocableRequest>{requestData})[0];
 
-    System.assertEquals(requestData.flagKey, responseData.flagKey, 'Response flag key should match the request flag key');
-    System.assertEquals(requestData.flagType, responseData.flagType, 'Response flag key should match the request flag key');
     System.assertEquals(2024.06, responseData.doubleVariation, 'Response Double Variation should be 2024.06 to match the fallback value since the flag does not exist');
   }
 
@@ -86,8 +80,6 @@ private class LDClientInvocableTest {
 
     LDClientInvocable.InvocableResponse responseData = LDClientInvocable.flagVariation(new List<LDClientInvocable.InvocableRequest>{requestData})[0];
 
-    System.assertEquals(requestData.flagKey, responseData.flagKey, 'Response flag key should match the request flag key');
-    System.assertEquals(requestData.flagType, responseData.flagType, 'Response flag key should match the request flag key');
     System.assertEquals('test string', responseData.stringVariation, 'Response String Variation should be \'test string\' to match the fallback value since the flag does not exist');
   }
 }

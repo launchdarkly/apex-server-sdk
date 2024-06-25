@@ -1,10 +1,13 @@
 public class EventSink implements EventSinkInterface {
   Integer maxEvents;
+  private Integer eventsAddedCount;
+  private Integer existingEventsCount;
 
   public EventSink(Integer maxEvents) {
     System.assertNotEquals(maxEvents, null);
 
     this.maxEvents = maxEvents;
+    this.eventsAddedCount = 0;
   }
 
   public void sinkIdentify(LDEvent.Identify event) {
@@ -24,9 +27,12 @@ public class EventSink implements EventSinkInterface {
   }
 
   public void sinkGeneric(String kind, String raw) {
-    Integer count = [SELECT COUNT() FROM EventData__c];
-
-    if (count >= this.maxEvents) {
+    // Preserve SOQL queries (each transaction only gets 100) by getting count once and comparing to updated events count
+    if (existingEventsCount == null) {
+      existingEventsCount = [SELECT COUNT() FROM EventData__c];
+    }
+    // Only create event if threshold has not been met
+    if ((existingEventsCount + eventsAddedCount) >= this.maxEvents) {
       return;
     }
 
@@ -35,5 +41,6 @@ public class EventSink implements EventSinkInterface {
     record.Raw__c = raw;
 
     insert record;
+    eventsAddedCount++;
   }
 }
