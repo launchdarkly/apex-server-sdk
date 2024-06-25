@@ -289,6 +289,8 @@ func (bridge *Bridge) eventLoop() error {
 		} else {
 			if pollResponse.StatusCode != 200 {
 				log.Print("poll events expected 200 but got ", pollResponse.StatusCode)
+				errorBody, err := ioutil.ReadAll(pollResponse.Body)
+				log.Print("Salesforce poll events failure: ", string(errorBody), err)
 				goto End
 			}
 
@@ -413,6 +415,8 @@ func (bridge *Bridge) featureLoop() error {
 
 			if pushResponse.StatusCode != 200 {
 				log.Print("push flags expected 200 got ", pushResponse.StatusCode)
+				errorBody, err := ioutil.ReadAll(pushResponse.Body)
+				log.Print("Salesforce push flags failure: ", string(errorBody), err)
 				goto End
 			}
 
