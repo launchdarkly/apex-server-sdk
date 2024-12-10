@@ -1,20 +1,29 @@
 public class DataStore implements DataStoreInterface {
+  private Map<String, Map<String, VersionedData__c>> versionedDataMap;
+
   public DataStore() {
   }
 
-  public VersionedData__C getVersioned(String key, String kind) {
-    List<VersionedData__c> versioned = [
-      SELECT Version__c, Raw__c, Key__c, Kind__c
-      FROM VersionedData__c
-      WHERE Key__c = :key AND Kind__c = :kind
-      LIMIT 1
-    ];
-
-    if (versioned.isEmpty()) {
-      return null;
-    } else {
-      return versioned.get(0);
+  private void populateVersioned() {
+    // Preserve SOQL queries (each transaction only gets 100) by querying all data once
+    // Data can them be retrieved via the map structure in the event that multiple data are needed at different times
+    if (versionedDataMap == null) {
+      versionedDataMap = new Map<String, Map<String, VersionedData__c>>{
+        'flags' => new Map<String, VersionedData__c>(),
+        'segments' => new Map<String, VersionedData__c>()
+      };
+      for (VersionedData__c vd : [
+        SELECT Id, Version__c, Raw__c, Key__c, Kind__c
+        FROM VersionedData__c
+      ]) {
+        versionedDataMap.get(vd.Kind__c).put(vd.Key__c, vd);
+      }
     }
+  }
+
+  public VersionedData__c getVersioned(String key, String kind) {
+    populateVersioned();
+    return versionedDataMap.get(kind).get(key);
   }
 
   public DataModel.Flag getFlag(String key) {
@@ -38,15 +47,10 @@ public class DataStore implements DataStoreInterface {
   }
 
   public Map<String, DataModel.Flag> allFlags() {
+    populateVersioned();
     Map<String, DataModel.Flag> result = new Map<String, DataModel.Flag>();
 
-    List<VersionedData__c> flags = [
-      SELECT Version__c, Raw__c, Key__c, Kind__c
-      FROM VersionedData__c
-      WHERE Kind__c = 'flags'
-    ];
-
-    for (VersionedData__C flag : flags) {
+    for (VersionedData__C flag : versionedDataMap.get('flags').values()) {
       try {
         result.put(flag.Key__c, new DataModel.Flag(flag.Raw__c));
       } catch (Exception err) {
@@ -59,9 +63,15 @@ public class DataStore implements DataStoreInterface {
 
   public void putAll(Map<String, Object> kinds) {
     // delete existing store values
-    List<VersionedData__c> existingFeatures = [SELECT Key__c FROM VersionedData__C];
-    delete existingFeatures;
+    populateVersioned();
+    List<VersionedData__c> existingFeatures = new List<VersionedData__c>();
+    existingFeatures.addAll(versionedDataMap.get('flags').values());
+    existingFeatures.addAll(versionedDataMap.get('segments').values());
+    if (existingFeatures.size() > 0) {
+      delete existingFeatures;
+    }
     // iterate over kinds of features such as flags / segments
+    List<VersionedData__c> featureList = new List<VersionedData__c>();
     for (String kind : kinds.keySet()) {
       Map<String, Object> features = (Map<String, Object>) kinds.get(kind);
 
@@ -70,16 +80,14 @@ public class DataStore implements DataStoreInterface {
 
         VersionedData versioned = new VersionedData(kind, feature);
 
-        this.insertVersionedData(versioned);
+        featureList.add(versioned.getSObject());
       }
     }
-  }
-
-  public void insertVersionedData(VersionedData value) {
-    try {
-      insert value.getSObject();
-    } catch (Exception err) {
-      // required by compiler
+    if (featureList.size() > 0) {
+      insert featureList;
     }
+
+    // clear our versionedDataMap so that next time it is required it will be repopulated
+    versionedDataMap = null;
   }
 }
