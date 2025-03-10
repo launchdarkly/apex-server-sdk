@@ -12,6 +12,8 @@ See `LDConfig.Builder` for descriptions.
 ```java
 Boolean getAllAttributesPrivate()
 Integer getMaxEventsInQueue()
+Integer getCacheTtl()
+Boolean getBatchEvents()
 ```
 
 ## class LDConfig.Builder
@@ -29,6 +31,7 @@ Builder()
 
 ### Setter methods
 
+#### `allAttributesPrivate`
 If all events sent to LaunchDarkly by this client should have fully redacted
 user attributes. If `allAttributesPrivate` is set to `null` it defaults to
 `false`.
@@ -37,6 +40,19 @@ user attributes. If `allAttributesPrivate` is set to `null` it defaults to
 Builder setAllAttributesPrivate(Boolean allAttributesPrivate)
 ```
 
+#### `setCacheTtl`
+By default, the SDK will issue an SOQL query to fetch each feature flag or segment on demand. This ensures the SDK is working on the latest known data. However, this can run into governor limits, depending on your usage patterns.
+
+To prevent excessive querying, you can enable caching with `setCacheTtl`. This will cache the feature flags and segments for the specified number of milliseconds.
+
+If the cache is enabled, the SDK will instead load the entire data set from the store, only requerying for data every `cacheTtl` milliseconds. This can help reduce the number of queries made to the store, but it may also mean that the SDK is working with potentially stale data.
+
+```java
+Builder setCacheTtl(Long ttl)
+```
+
+#### `setMaxEventsInQueue`
+
 The maximum number of events that can be queued for collection by the bridge.
 If this limit is breached before events are delivered by the bridge events
 will be dropped to prevent resource exhaustion. The default limit is 1000
@@ -44,6 +60,16 @@ queued events. If `maxEvents` is set to `null` the default limit is used.
 
 ```java
 Builder setMaxEventsInQueue(Integer maxEvents)
+```
+
+#### `setBatchEvents`
+
+By default, the SDK will write events to the table as they are generated. This can be inefficient if you are generating a large number of events in a short period of time. The SDK can instead be configured to batch events and write them to the table in a single transaction.
+
+>**Note:** If you are using the `batchEvents` feature, you should call `LDClient.close` at the end of your transaction. This will ensure that all events are written to the table.
+
+```java
+Builder setBatchEvents(Boolean batchEvents)
 ```
 
 ### Other methods
@@ -101,24 +127,42 @@ LDValue jsonVariation(LDUser user, String key, LDValue fallback, EvaluationDetai
 
 ### Other methods
 
-Evaluate all flags for a given user, returning a map of flag key to evaluation 
+#### `allFlags`
+Evaluate all flags for a given user, returning a map of flag key to evaluation
 result.
 
 ```java
 Map<String, LDValue> allFlags(LDUser user)
 ```
 
+#### `identify`
 Send a user to LaunchDarkly.
 
 ```java
 void identify(LDUser user)
 ```
 
+#### `track`
 Send an event to LaunchDarkly. If `user`, or `key` are `null` this is a no-op.
 The fields `optionalMetric`, and `optionalValue` may both be `null`.
 
 ```java
 void track(LDUser user, String key, Double optionalMetric, LDValue optionalValue)
+```
+
+#### `flush`
+Depending on your specific configuration, the SDK may batch events in memory. Typically you would call `close` on the SDK at the end of your transaction to ensure that all events are written to the table. However, if you would prefer to write events to the table immediately, you can call `flush`.
+
+```java
+void flush()
+```
+
+#### `close`
+To ensure an orderly and clean shutdown of the SDK, call `close` when you are
+done with the SDK. This will ensure that all events are written to the table.
+
+```java
+void close()
 ```
 
 ## class LDClient.EvaluationDetail
@@ -246,7 +290,7 @@ Builder setPrivateAttributeNames(Set<String> privateAttributeNames)
 Set the users `key`, should not be `null.`
 
 ```java
-Builder setKey(String key) 
+Builder setKey(String key)
 ```
 
 Mark a user as anonymous or not. If `null` this defaults to `false`.
@@ -378,7 +422,7 @@ Append an `LDValue` to the end of the builders internal list.
 Builder add(LDValue value)
 ```
 
-Create an immutable `LDValue` from the internal list. 
+Create an immutable `LDValue` from the internal list.
 
 ```java
 LDValue build()

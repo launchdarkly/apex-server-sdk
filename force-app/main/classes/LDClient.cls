@@ -30,14 +30,28 @@ public class LDClient {
       this.config = config;
     }
 
-    this.store = new DataStore();
-    this.eventSink = new EventSink(this.config.getMaxEventsInQueue());
     this.getTime = new GetTimeImpl();
+    if (config.getCacheTtl() != null) {
+      this.store = new CachingDataStore(config.getCacheTtl(), this.getTime);
+    } else {
+      this.store = new DataStore();
+    }
+
+    if (config.getBatchEvents()) {
+      this.eventSink = new BatchingEventSink(this.config.getMaxEventsInQueue());
+    } else {
+      this.eventSink = new EventSink(this.config.getMaxEventsInQueue());
+    }
+
     this.evaluator = new Evaluator(this.store, this.getTime);
   }
 
   public LDClient() {
     this(new LDConfig.Builder().build());
+  }
+
+  public void close() {
+    this.eventSink.close();
   }
 
   public Boolean boolVariation(LDUser user, String key, Boolean fallback) {

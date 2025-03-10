@@ -6,4 +6,8 @@ public interface EventSinkInterface {
   void sinkFeature(LDEvent.Feature event);
 
   void sinkAlias(LDEvent.Alias event);
+
+  void flush();
+
+  void close();
 }
