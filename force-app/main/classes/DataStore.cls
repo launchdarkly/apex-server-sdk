@@ -1,7 +1,4 @@
 public class DataStore implements DataStoreInterface {
-  private final Map<String, DataModel.Flag> flagsCache = new Map<String, DataModel.Flag>();
-  private final Map<String, DataModel.Segment> segmentsCache = new Map<String, DataModel.Segment>();
-
   public DataStore() {
   }
 
@@ -21,35 +18,22 @@ public class DataStore implements DataStoreInterface {
   }
 
   public DataModel.Flag getFlag(String key) {
-    if (this.flagsCache.containsKey(key)) {
-      return this.flagsCache.get(key);
-    }
-
     VersionedData__c versioned = getVersioned(key, 'flags');
 
     if (versioned == null) {
-      this.flagsCache.put(key, null);
       return null;
     } else {
-      DataModel.Flag model = new DataModel.Flag(versioned.Raw__c);
-      this.flagsCache.put(key, model);
-      return model;
+      return new DataModel.Flag(versioned.Raw__c);
     }
   }
 
   public DataModel.Segment getSegment(String key) {
-    if (this.segmentsCache.containsKey(key)) {
-      return this.segmentsCache.get(key);
-    }
-
     VersionedData__c versioned = getVersioned(key, 'segments');
 
     if (versioned == null) {
-      return this.segmentsCache.put(key, null);
+      return null;
     } else {
-      DataModel.Segment model = new DataModel.Segment(JSON.deserializeUntyped(versioned.Raw__c));
-      this.segmentsCache.put(key, model);
-      return model;
+      return new DataModel.Segment(JSON.deserializeUntyped(versioned.Raw__c));
     }
   }
 
@@ -62,13 +46,9 @@ public class DataStore implements DataStoreInterface {
       WHERE Kind__c = 'flags'
     ];
 
-    this.flagsCache.clear();
-
     for (VersionedData__C flag : flags) {
       try {
-        DataModel.Flag model = new DataModel.Flag(flag.Raw__c);
-        result.put(flag.Key__c, model);
-        this.flagsCache.put(flag.Key__c, model);
+        result.put(flag.Key__c, new DataModel.Flag(flag.Raw__c));
       } catch (Exception err) {
         // required by compiler
       }
@@ -81,11 +61,6 @@ public class DataStore implements DataStoreInterface {
     // delete existing store values
     List<VersionedData__c> existingFeatures = [SELECT Key__c FROM VersionedData__C];
     delete existingFeatures;
-
-    // Clear the cache. These will be re-hydrated as flags are requested.
-    this.flagsCache.clear();
-    this.segmentsCache.clear();
-
     // iterate over kinds of features such as flags / segments
     for (String kind : kinds.keySet()) {
       Map<String, Object> features = (Map<String, Object>) kinds.get(kind);
