@@ -47,12 +47,9 @@ private class LDClientTest {
     LDClient client = new LDClient(config);
 
     for (Integer i = 0, j = 0; i < 200; i++) {
-        LDUser user = new LDUser.Builder('user-key')
-            .setName('Sandy')
-            .setKey('Test-' + i)
-            .build();
-        Boolean value = client.boolVariation(user, 'hello', false);
-        System.assertEquals(true, value);
+      LDUser user = new LDUser.Builder('user-key').setName('Sandy').setKey('Test-' + i).build();
+      Boolean value = client.boolVariation(user, 'hello', false);
+      System.assertEquals(true, value);
     }
 
     client.close();

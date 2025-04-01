@@ -8,8 +8,12 @@ private class DataStoreTest {
 
   private static final String payload1 =
     '{' +
-    '"flags": {"hello": ' + flag1 + '},' +
-    '"segments": {"hello": ' + segment1 + '}' +
+    '"flags": {"hello": ' +
+    flag1 +
+    '},' +
+    '"segments": {"hello": ' +
+    segment1 +
+    '}' +
     '}';
 
   @isTest

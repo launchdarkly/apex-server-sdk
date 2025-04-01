@@ -8,14 +8,22 @@ private class CachingDataStoreTest {
 
   private static final String payload1 =
     '{' +
-    '"flags": {"hello": ' + flag1 + '},' +
-    '"segments": {"hello": ' + segment1 + '}' +
+    '"flags": {"hello": ' +
+    flag1 +
+    '},' +
+    '"segments": {"hello": ' +
+    segment1 +
+    '}' +
     '}';
 
   private static final String payload2 =
     '{' +
-    '"flags": {"hello": ' + flag2 + '},' +
-    '"segments": {"hello": ' + segment2 + '}' +
+    '"flags": {"hello": ' +
+    flag2 +
+    '},' +
+    '"segments": {"hello": ' +
+    segment2 +
+    '}' +
     '}';
 
   @isTest

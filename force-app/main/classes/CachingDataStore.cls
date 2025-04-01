@@ -35,7 +35,7 @@ public class CachingDataStore implements DataStoreInterface {
     ];
 
     for (VersionedData__C datum : versionedData) {
-      //try {
+      try {
         if (datum.Kind__c == 'flags') {
           DataModel.Flag model = new DataModel.Flag(datum.Raw__c);
           this.flagsCache.put(datum.Key__c, model);
@@ -43,9 +43,9 @@ public class CachingDataStore implements DataStoreInterface {
           DataModel.Segment model = new DataModel.Segment(JSON.deserializeUntyped(datum.Raw__c));
           this.segmentsCache.put(datum.Key__c, model);
         }
-      //} catch (Exception err) {
+      } catch (Exception err) {
         // required by compiler
-      //}
+      }
     }
 
     this.cachedAt = now;
