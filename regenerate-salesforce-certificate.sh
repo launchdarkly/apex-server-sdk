@@ -6,7 +6,6 @@
 # The purpose is to allow this SDK to be automatically tested in CI against LaunchDarkly's scratch org.
 
 # See also:
-# https://github.com/CircleCI-Public/Salesforce-sfdx-cli-orb (CircleCI integration)
 # https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_auth_connected_app.htm
 # (information on how to store the generated certificate in Salesforce)
 #

@@ -1,6 +1,6 @@
 # LaunchDarkly Server-Side SDK for Salesforce Apex
 
-[![CircleCI](https://circleci.com/gh/launchdarkly/apex-server-sdk.svg?style=svg)](https://circleci.com/gh/launchdarkly/apex-server-sdk)
+[![Run CI](https://github.com/launchdarkly/apex-server-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/launchdarkly/apex-server-sdk/actions/workflows/ci.yml)
 
 ## Getting started
 
