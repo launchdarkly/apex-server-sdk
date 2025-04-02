@@ -10,4 +10,14 @@ private class EventSinkTest {
 
     System.assertEquals(2, [SELECT COUNT() FROM EventData__c]);
   }
+
+  @isTest
+  static void eventSinkClosingMeansNothing() {
+    EventSink sink = new EventSink(2);
+    sink.close();
+
+    sink.sinkGeneric('1', '2');
+
+    System.assertEquals(1, [SELECT COUNT() FROM EventData__c]);
+  }
 }

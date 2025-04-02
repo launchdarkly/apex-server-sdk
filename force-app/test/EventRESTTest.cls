@@ -5,6 +5,7 @@ private class EventRESTTest {
     EventSink sink = new EventSink(1000);
 
     sink.sinkIdentify(new LDEvent.Identify(new LDUser.Builder('abc').build(), 0, false));
+    sink.flush();
 
     Object bundle = EventREST.prepareEvents();
 
@@ -20,6 +21,7 @@ private class EventRESTTest {
     EventSink sink = new EventSink(1000);
 
     sink.sinkIdentify(new LDEvent.Identify(new LDUser.Builder('abc').build(), 0, false));
+    sink.flush();
 
     RestResponse response = new RestResponse();
 

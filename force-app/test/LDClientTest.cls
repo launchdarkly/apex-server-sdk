@@ -39,6 +39,23 @@ private class LDClientTest {
   }
 
   @isTest
+  static void canEvaluateMoreThan100TimesWithCaching() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(true)));
+
+    LDConfig config = new LDConfig.Builder().setCacheTtl(100).setBatchEvents(true).build();
+    LDClient client = new LDClient(config);
+
+    for (Integer i = 0, j = 0; i < 200; i++) {
+      LDUser user = new LDUser.Builder('user-key').setName('Sandy').setKey('Test-' + i).build();
+      Boolean value = client.boolVariation(user, 'hello', false);
+      System.assertEquals(true, value);
+    }
+
+    client.close();
+  }
+
+  @isTest
   static void basicVariationWithDetail() {
     DataStore store = new DataStore();
     store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(true)));
@@ -199,6 +216,7 @@ private class LDClientTest {
     client.getTime = new GetTimeMock();
 
     client.identify(user);
+    client.close();
 
     List<EventData__c> events = [SELECT Kind__c, Raw__c FROM EventData__C];
 
@@ -219,6 +237,7 @@ private class LDClientTest {
     client.getTime = new GetTimeMock();
 
     client.alias(currentUser, previousUser);
+    client.close();
 
     List<EventData__c> events = [SELECT Kind__c, Raw__c FROM EventData__C];
 
@@ -246,6 +265,7 @@ private class LDClientTest {
     client.getTime = new GetTimeMock();
 
     client.track(user, 'abc', null, null);
+    client.close();
 
     List<EventData__c> events = [SELECT Kind__c, Raw__c FROM EventData__C];
 
@@ -266,6 +286,7 @@ private class LDClientTest {
     client.getTime = new GetTimeMock();
 
     client.track(user, '123', (Double) 52.1, value);
+    client.close();
 
     List<EventData__c> events = [SELECT Kind__c, Raw__c FROM EventData__C];
 

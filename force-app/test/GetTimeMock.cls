@@ -1,6 +1,6 @@
 @isTest
 public class GetTimeMock implements GetTimeInterface {
-  Long counter;
+  public Long counter;
 
   public GetTimeMock() {
     this.counter = 0;

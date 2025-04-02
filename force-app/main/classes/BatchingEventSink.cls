@@ -1,10 +1,12 @@
-public class EventSink implements EventSinkInterface {
+public class BatchingEventSink implements EventSinkInterface {
+  List<EventData__c> events;
   Integer maxEvents;
 
-  public EventSink(Integer maxEvents) {
+  public BatchingEventSink(Integer maxEvents) {
     System.assertNotEquals(maxEvents, null);
 
     this.maxEvents = maxEvents;
+    this.events = new List<EventData__c>();
   }
 
   public void sinkIdentify(LDEvent.Identify event) {
@@ -24,9 +26,7 @@ public class EventSink implements EventSinkInterface {
   }
 
   public void sinkGeneric(String kind, String raw) {
-    Integer count = [SELECT COUNT() FROM EventData__c];
-
-    if (count >= this.maxEvents) {
+    if (events.size() >= this.maxEvents) {
       return;
     }
 
@@ -34,12 +34,19 @@ public class EventSink implements EventSinkInterface {
     record.Kind__c = kind;
     record.Raw__c = raw;
 
-    insert record;
-  }
-
-  public void flush() {
+    this.events.add(record);
   }
 
   public void close() {
+    this.flush();
+
+    // This disables the sink from receiving more events after it's closed
+    this.maxEvents = 0;
+  }
+
+  public void flush() {
+    if (events.size() > 0) {
+      insert events;
+    }
   }
 }
