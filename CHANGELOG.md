@@ -2,6 +2,13 @@
 
 All notable changes to the LaunchDarkly Apex server-side SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.4.0](https://github.com/launchdarkly/apex-server-sdk/compare/1.3.0...1.4.0) (2025-04-14)
+
+
+### Features
+
+* Add caching data store and batching event sink ([#25](https://github.com/launchdarkly/apex-server-sdk/issues/25)) ([6bee005](https://github.com/launchdarkly/apex-server-sdk/commit/6bee0050d5ee3197641792b466e11d79b1c77b71))
+
 ## [1.3.0] - 2024-01-23
 ### Added:
 - Added additional unit tests to meet 75% minimum coverage required by Salesforce. Thanks, @estebanefi!
