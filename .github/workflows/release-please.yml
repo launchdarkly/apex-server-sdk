@@ -11,6 +11,7 @@ jobs:
     permissions:
       contents: write # Contents and pull-requests are for release-please to make releases.
       pull-requests: write
+      issues: write
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
