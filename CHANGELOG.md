@@ -2,6 +2,13 @@
 
 All notable changes to the LaunchDarkly Apex server-side SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.4.1](https://github.com/launchdarkly/apex-server-sdk/compare/1.4.0...1.4.1) (2025-08-07)
+
+
+### Bug Fixes
+
+* Fix Salesforce Governor limit when syncing from bridge ([#33](https://github.com/launchdarkly/apex-server-sdk/issues/33)) ([70ba7ea](https://github.com/launchdarkly/apex-server-sdk/commit/70ba7ea82b13006118762cb026f99164d61bb6eb))
+
 ## [1.4.0](https://github.com/launchdarkly/apex-server-sdk/compare/1.3.0...1.4.0) (2025-04-14)
 
 
