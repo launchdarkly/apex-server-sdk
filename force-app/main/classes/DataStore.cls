@@ -59,8 +59,10 @@ public class DataStore implements DataStoreInterface {
 
   public void putAll(Map<String, Object> kinds) {
     // delete existing store values
-    List<VersionedData__c> existingFeatures = [SELECT Key__c FROM VersionedData__C];
-    delete existingFeatures;
+    delete [SELECT Key__c FROM VersionedData__c];
+
+    List<VersionedData__c> versionData = new List<VersionedData__c>();
+
     // iterate over kinds of features such as flags / segments
     for (String kind : kinds.keySet()) {
       Map<String, Object> features = (Map<String, Object>) kinds.get(kind);
@@ -70,14 +72,12 @@ public class DataStore implements DataStoreInterface {
 
         VersionedData versioned = new VersionedData(kind, feature);
 
-        this.insertVersionedData(versioned);
+        versionData.add(versioned.getSObject());
       }
     }
-  }
 
-  public void insertVersionedData(VersionedData value) {
     try {
-      insert value.getSObject();
+      insert versionData;
     } catch (Exception err) {
       // required by compiler
     }

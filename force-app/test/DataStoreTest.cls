@@ -1,17 +1,17 @@
 @isTest
 private class DataStoreTest {
-  private static final String flag1 = '{"version": 52, "key": "hello", "on": true, "salt": "salt", "variations": [true, false], "fallthrough": {"variation": 0}}';
-  private static final String flag2 = '{"version": 53, "key": "hello", "on": true, "salt": "salt", "variations": [true, false], "fallthrough": {"variation": 0}}';
+  private static final String flag1 = '{' + '"version": 52,' + '"key": "hello"' + '}';
 
-  private static final String segment1 = '{"version": 50, "key": "hello", "salt": "salt", "rules": []}';
-  private static final String segment2 = '{"version": 51, "key": "hello", "salt": "salt", "rules": []}';
+  private static final String segment1 = '{' + '"version": 50,' + '"key": "hello"' + '}';
 
   private static final String payload1 =
     '{' +
-    '"flags": {"hello": ' +
+    '"flags": {' +
+    '"hello": ' +
     flag1 +
     '},' +
-    '"segments": {"hello": ' +
+    '"segments": {' +
+    '"hello": ' +
     segment1 +
     '}' +
     '}';
@@ -22,6 +22,13 @@ private class DataStoreTest {
 
     System.assertEquals(store.getFlag('bad_flag'), null);
     System.assertEquals(store.getSegment('bad_segment'), null);
+  }
+
+  @isTest
+  static void getAllFlags() {
+    DataStore store = new DataStore();
+
+    System.assertEquals(store.allFlags().size(), 0);
   }
 
   @isTest
