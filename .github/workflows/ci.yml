@@ -35,7 +35,6 @@ jobs:
           ssm_parameter_pairs: '
             /production/common/releasing/apex/username = DEFAULT_USERNAME,
             /production/common/releasing/apex/consumer_key = SFDX_CONSUMER_KEY,
-            /production/common/releasing/apex/jwt_key = SFDX_JWT_KEY,
             /production/common/releasing/apex/server.key = SERVER_KEY'
 
       - name: Create server.key
