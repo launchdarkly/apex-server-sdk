@@ -64,9 +64,11 @@ Builder setMaxEventsInQueue(Integer maxEvents)
 
 #### `setBatchEvents`
 
-By default, the SDK will write events to the table as they are generated. This can be inefficient if you are generating a large number of events in a short period of time. The SDK can instead be configured to batch events and write them to the table in a single transaction.
+By default, the SDK uses an event sink that writes each event to the `EventData__c` table immediately as it is generated. This means events are persisted in real time, and no explicit flush or close call is required to ensure delivery.
 
->**Note:** If you are using the `batchEvents` feature, you should call `LDClient.close` at the end of your transaction. This will ensure that all events are written to the table.
+If you are generating a large number of events in a short period of time, this can be inefficient due to the overhead of individual DML operations. To address this, the SDK can be configured to use a batching event sink that accumulates events in memory and writes them to the table in a single transaction when `LDClient.close` is called.
+
+>**Note:** If you are using the `batchEvents` feature, you *must* call `LDClient.close` at the end of your transaction. Without this call, batched events will not be written to the table.
 
 ```java
 Builder setBatchEvents(Boolean batchEvents)
@@ -150,16 +152,8 @@ The fields `optionalMetric`, and `optionalValue` may both be `null`.
 void track(LDUser user, String key, Double optionalMetric, LDValue optionalValue)
 ```
 
-#### `flush`
-Depending on your specific configuration, the SDK may batch events in memory. Typically you would call `close` on the SDK at the end of your transaction to ensure that all events are written to the table. However, if you would prefer to write events to the table immediately, you can call `flush`.
-
-```java
-void flush()
-```
-
 #### `close`
-To ensure an orderly and clean shutdown of the SDK, call `close` when you are
-done with the SDK. This will ensure that all events are written to the table.
+When using the batching event sink (see `LDConfig.Builder.setBatchEvents`), call `close` when you are done with the SDK to ensure that all buffered events are written to the table. When using the default event sink, events are written immediately, so calling `close` is not strictly necessary but is still recommended for a clean shutdown.
 
 ```java
 void close()
