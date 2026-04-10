@@ -1,5 +1,6 @@
 {
-  "name": "launchdarkly",
+  "private": true,
+  "name": "launchdarkly-apex-server-sdk",
   "version": "1.0.0",
   "description": "LaunchDarkly Apex SDK",
   "homepage": "",
