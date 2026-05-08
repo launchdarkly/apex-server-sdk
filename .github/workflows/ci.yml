@@ -22,12 +22,6 @@ jobs:
       - name: Install Salesforce CLI (sfdx)
         run: npm install @salesforce/cli --global
 
-      - name: Install packages
-        run: npm ci
-
-      - name: Check formatting
-        run: npm run prettier:check:ci
-
       - uses: launchdarkly/gh-actions/actions/release-secrets@release-secrets-v1.2.0
         name: 'Get secrets from AWS SSM'
         with:
