@@ -30,7 +30,7 @@ const (
 	LD_EVENTS_URI = "https://events.launchdarkly.com"
 	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
 	POLL_INTERVAL = 30 * time.Second
-	SDK_VERSION   = "1.4.1" // x-release-please-version
+	SDK_VERSION   = "1.5.0" // x-release-please-version
 	USER_AGENT    = "ApexServerClient/" + SDK_VERSION
 	HTTP_TIMEOUT  = 30 * time.Second
 	// INSTANCE_ID_HEADER is the HTTP header used to identify this bridge instance for
