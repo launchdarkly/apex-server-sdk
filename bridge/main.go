@@ -21,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -31,6 +33,12 @@ const (
 	SDK_VERSION   = "1.4.1" // x-release-please-version
 	USER_AGENT    = "ApexServerClient/" + SDK_VERSION
 	HTTP_TIMEOUT  = 30 * time.Second
+	// INSTANCE_ID_HEADER is the HTTP header used to identify this bridge instance for
+	// estimating server-connection-minutes when polling LaunchDarkly. Its value is a
+	// v4 UUID generated once per bridge process and constant for that process's lifetime.
+	//
+	// See: sdk-specs / SCMP-server-connection-minutes-polling (section 1.1).
+	INSTANCE_ID_HEADER = "X-LaunchDarkly-Instance-Id"
 )
 
 type Bridge struct {
@@ -46,9 +54,13 @@ type Bridge struct {
 	oauthCurrentToken     string
 	oauthJWTKey           *rsa.PrivateKey
 	oauthURI              url.URL
-	lock                  sync.Mutex
-	context               context.Context
-	cancel                context.CancelFunc
+	// instanceID is a v4 UUID generated once per bridge process. It is sent on every
+	// LaunchDarkly-bound request (see INSTANCE_ID_HEADER) so the platform can estimate
+	// server-connection-minutes for polling clients.
+	instanceID string
+	lock       sync.Mutex
+	context    context.Context
+	cancel     context.CancelFunc
 }
 
 func newBridge() (*Bridge, error) {
@@ -144,6 +156,11 @@ func newBridge() (*Bridge, error) {
 	context, cancel := context.WithCancel(context.Background())
 	bridge.context = context
 	bridge.cancel = cancel
+
+	// Generate a stable v4 UUID once per bridge instance. This identifier travels on
+	// every LaunchDarkly-bound request via INSTANCE_ID_HEADER for the lifetime of the
+	// process, per the SCMP-server-connection-minutes-polling spec.
+	bridge.instanceID = uuid.New().String()
 
 	return &bridge, nil
 }
@@ -312,6 +329,9 @@ func (bridge *Bridge) eventLoop() error {
 			pushRequest.Header.Set("X-LaunchDarkly-Event-Schema", "3")
 			pushRequest.Header.Set("Authorization", bridge.launchDarklyKey)
 			pushRequest.Header.Set("User-Agent", USER_AGENT)
+			// Sent on every LaunchDarkly-bound request (matches the reference Go SDK,
+			// where DefaultHeaders carries the instance id across poll/stream/events).
+			pushRequest.Header.Set(INSTANCE_ID_HEADER, bridge.instanceID)
 
 			log.Print("pushing events to: " + pushURI)
 
@@ -356,6 +376,7 @@ func (bridge *Bridge) featureLoop() error {
 
 		pollRequest.Header.Set("Authorization", bridge.launchDarklyKey)
 		pollRequest.Header.Set("User-Agent", USER_AGENT)
+		pollRequest.Header.Set(INSTANCE_ID_HEADER, bridge.instanceID)
 
 		if etag != "" {
 			pollRequest.Header.Set("If-None-Match", etag)

@@ -71,3 +71,8 @@ jobs:
         run: |
           cd bridge
           go build .
+
+      - name: Test
+        run: |
+          cd bridge
+          go test ./...
