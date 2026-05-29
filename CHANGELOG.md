@@ -2,6 +2,13 @@
 
 All notable changes to the LaunchDarkly Apex server-side SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.5.0](https://github.com/launchdarkly/apex-server-sdk/compare/1.4.1...1.5.0) (2026-05-26)
+
+
+### Features
+
+* add X-LaunchDarkly-Instance-Id header (SDK-2352) ([#51](https://github.com/launchdarkly/apex-server-sdk/issues/51)) ([5eb7561](https://github.com/launchdarkly/apex-server-sdk/commit/5eb7561927b1ddf3ed87f580691c9d20d685c582))
+
 ## [1.4.1](https://github.com/launchdarkly/apex-server-sdk/compare/1.4.0...1.4.1) (2025-08-07)
 
 
