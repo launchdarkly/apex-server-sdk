@@ -480,13 +480,11 @@ func (bridge *Bridge) run() error {
 func main() {
 	bridge, err := newBridge()
 	if err != nil {
-		log.Print("Error creating bridge: ", err)
-		return
+		log.Fatal("Error creating bridge: ", err)
 	}
 
 	err = bridge.run()
 	if err != nil {
-		log.Print("Error running bridge: ", err)
-		return
+		log.Fatal("Error running bridge: ", err)
 	}
 }
