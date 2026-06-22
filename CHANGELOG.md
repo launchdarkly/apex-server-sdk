@@ -2,6 +2,13 @@
 
 All notable changes to the LaunchDarkly Apex server-side SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.5.1](https://github.com/launchdarkly/apex-server-sdk/compare/1.5.0...1.5.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* Exit with non-zero status code on fatal errors ([#57](https://github.com/launchdarkly/apex-server-sdk/issues/57)) ([81edc40](https://github.com/launchdarkly/apex-server-sdk/commit/81edc406c635edc5baa94ae37b0fb9f93755411a))
+
 ## [1.5.0](https://github.com/launchdarkly/apex-server-sdk/compare/1.4.1...1.5.0) (2026-05-26)
 
 
