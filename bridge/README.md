@@ -37,4 +37,78 @@ export OAUTH_URI='YOUR OAUTH URI'
 export HTTP_TIMEOUT='Your timeout'
 # such as: '1500ms'
 # see https://golang.org/pkg/time/#ParseDuration for formatting
+export EVENT_POLL_INTERVAL='How often to drain events from Salesforce'
+# such as: '10s'
+# if not set, unparseable, zero, or negative, defaults to: '30s'
+# anything under '5s' is honored but logs a warning about org-wide API limits
+export FLAG_POLL_INTERVAL='How often to poll LaunchDarkly for flag data'
+# such as: '5m'
+# if not set or unparseable, defaults to: '30s'
+# minimum is '30s'; anything shorter is clamped up to '30s'
 ```
+
+## Polling intervals
+
+The daemon runs two independent loops, each on its own interval:
+
+| Loop | What it does | Variable | Default | Minimum |
+| --- | --- | --- | --- | --- |
+| Events | Drains `EventData__c` from Salesforce, then posts to LaunchDarkly | `EVENT_POLL_INTERVAL` | `30s` | greater than zero |
+| Flags | Polls LaunchDarkly for flag data, then pushes it to Salesforce | `FLAG_POLL_INTERVAL` | `30s` | `30s` |
+
+Both accept any [`time.ParseDuration`](https://golang.org/pkg/time/#ParseDuration) string.
+When a variable is unset, the daemon uses the historical 30-second cadence, so an
+existing deployment behaves exactly as it did before these options were added.
+
+The daemon never refuses to start over a poll interval. Instead it falls back or clamps
+and logs the interval actually in effect, so the startup log is the authoritative record
+of what the daemon is doing:
+
+| Configured value | Result |
+| --- | --- |
+| unset or empty | the `30s` default |
+| unparseable, such as `'30'` with no unit | the `30s` default |
+| below the variable's minimum | clamped up to that minimum |
+
+Because a malformed value is treated as unset rather than as an error, check the startup
+log after changing either variable. `time.ParseDuration` requires a unit, so `'30'` is
+not 30 seconds -- it does not parse, and the daemon quietly keeps the default.
+
+Note that `HTTP_TIMEOUT` does not behave this way: an unparseable `HTTP_TIMEOUT` stops
+the daemon with an error.
+
+### Choosing an event interval
+
+`FLAG_POLL_INTERVAL` is floored at 30 seconds to match the minimum polling interval
+used across LaunchDarkly's server SDKs. `EVENT_POLL_INTERVAL` has no such floor,
+because draining events more often is a reasonable tradeoff to make -- but it is a
+tradeoff worth understanding before you make it.
+
+Every drain is one inbound Salesforce REST call, and inbound calls count against your
+org's 24-hour API request allocation. (The SOQL query and DML delete the drain performs
+run inside the Apex transaction and count against per-transaction governor limits, not
+the daily API allocation.) `FLAG_POLL_INTERVAL` contributes too, since pushing flag data
+to Salesforce is also an inbound call.
+
+Salesforce allocates API requests per 24 hours by edition. For production orgs:
+
+| Edition | 24-hour allocation |
+| --- | --- |
+| Enterprise / Professional | 100,000 + 1,000 per license |
+| Unlimited / Performance | 100,000 + 5,000 per license |
+| Full Sandbox | 5,000,000 |
+
+So the smallest allocation a production org has to work with is about 100,000 calls per
+day. Against that, the drain alone costs:
+
+| `EVENT_POLL_INTERVAL` | Calls/day | Smallest production org (~100,000) | 200-license EE (~300,000) | 2,000-license EE (~2.1M) |
+| --- | --- | --- | --- | --- |
+| `30s` (default) | ~2,880 | 2.9% | 1.0% | 0.1% |
+| `10s` | ~8,640 | 8.6% | 2.9% | 0.4% |
+| `5s` | ~17,280 | 17% | 5.8% | 0.8% |
+| `1s` | ~86,400 | **86%** | 29% | 4% |
+
+Whether a short interval is affordable therefore depends on your edition and license
+count. On a large org a 1-second drain is a few percent of the allocation; on a small
+production org the same setting consumes most of the org's entire daily budget for this
+one integration, leaving little for everything else that calls the API.
