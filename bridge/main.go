@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -295,6 +296,7 @@ func (bridge *Bridge) authorizeSalesforce() (error, bool) {
 		return err, false
 	}
 	errorBody, err := ioutil.ReadAll(authResponse.Body)
+	authResponse.Body.Close()
 
 	if authResponse.StatusCode == 401 || authResponse.StatusCode == 403 {
 		log.Print("Salesforce permanent auth failure: ", authResponse.StatusCode, string(errorBody), err)
@@ -321,6 +323,21 @@ func (bridge *Bridge) authorizeSalesforce() (error, bool) {
 	bridge.oauthCurrentToken = parsed.AccessToken
 
 	return nil, false
+}
+
+// drainAndClose finishes with a response whose body the caller does not need.
+//
+// Both halves matter. Closing releases the connection's file descriptor, and draining
+// is what lets the transport put the connection back in its pool: a body that never
+// reaches EOF leaves the connection unusable, so the next request has to dial a new
+// one. Draining copies to ioutil.Discard rather than reading into a buffer, so an
+// oversized error body costs bandwidth but is never held in memory.
+//
+// StatusCode and Header remain readable afterwards, so a caller can finish with a
+// response before inspecting it.
+func drainAndClose(response *http.Response) {
+	_, _ = io.Copy(ioutil.Discard, response.Body)
+	_ = response.Body.Close()
 }
 
 func (bridge *Bridge) requestWithOauth(request *http.Request) (*http.Response, error, bool) {
@@ -365,12 +382,16 @@ func (bridge *Bridge) eventLoop() error {
 			goto End
 		} else {
 			if pollResponse.StatusCode != 200 {
+				// Nothing below needs the body, so stream it away instead of
+				// allocating it.
+				drainAndClose(pollResponse)
 				log.Print("poll events expected 200 but got ", pollResponse.StatusCode)
 				goto End
 			}
 
-			pollBytes, err := ioutil.ReadAll(pollResponse.Body)
-			if err != nil {
+			pollBytes, readErr := ioutil.ReadAll(pollResponse.Body)
+			pollResponse.Body.Close()
+			if readErr != nil {
 				log.Print("failed to read poll events response body")
 				goto End
 			}
@@ -400,6 +421,8 @@ func (bridge *Bridge) eventLoop() error {
 				log.Print("failed pushing events to LaunchDarkly")
 				goto End
 			}
+			// Only the status matters here, so the body is discarded rather than read.
+			drainAndClose(pushResponse)
 
 			if pushResponse.StatusCode == 401 || pushResponse.StatusCode == 403 {
 				return errors.New("Pushing events to LaunchDarkly unauthorized")
@@ -450,24 +473,29 @@ func (bridge *Bridge) featureLoop() error {
 
 			goto End
 		} else {
-			if pollResponse.StatusCode == 401 || pollResponse.StatusCode == 403 {
-				return errors.New("requesting flags unauthorized")
-			}
-
-			if pollResponse.StatusCode == 304 {
-				log.Print("poll flags received 304 skipping update")
-				goto End
-			}
-
 			if pollResponse.StatusCode != 200 {
+				// None of the cases below need the body -- a 304 does not even carry
+				// one -- so stream it away instead of allocating it.
+				drainAndClose(pollResponse)
+
+				if pollResponse.StatusCode == 401 || pollResponse.StatusCode == 403 {
+					return errors.New("requesting flags unauthorized")
+				}
+
+				if pollResponse.StatusCode == 304 {
+					log.Print("poll flags received 304 skipping update")
+					goto End
+				}
+
 				log.Print("poll flags expected 200, got ", pollResponse.StatusCode)
 				goto End
 			}
 
 			etag = ""
 
-			pollBytes, err := ioutil.ReadAll(pollResponse.Body)
-			if err != nil {
+			pollBytes, readErr := ioutil.ReadAll(pollResponse.Body)
+			pollResponse.Body.Close()
+			if readErr != nil {
 				log.Print("failed to read flag poll response body")
 				goto End
 			}
@@ -490,6 +518,8 @@ func (bridge *Bridge) featureLoop() error {
 				log.Print("failed pushings flags to salesforce: ", err)
 				goto End
 			}
+			// Only the status matters here, so the body is discarded rather than read.
+			drainAndClose(pushResponse)
 
 			if pushResponse.StatusCode != 200 {
 				log.Print("push flags expected 200 got ", pushResponse.StatusCode)
