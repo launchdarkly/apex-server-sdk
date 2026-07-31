@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -505,5 +506,233 @@ func TestEventPollIntervalAPIWarning(t *testing.T) {
 					bridge.eventPollInterval, logged.String())
 			}
 		})
+	}
+}
+
+// allowedConnections is the ceiling these tests hold the bridge to. A client that
+// finishes with each response reuses a single pooled connection for all of them, so a
+// healthy loop opens one or two. A loop that abandons its responses opens a fresh
+// connection per request, making the count track the request count instead.
+const allowedConnections = 5
+
+// connectionCounter starts an httptest server wrapping handler and returns it along
+// with a function reporting how many separate connections clients have opened to it.
+//
+// Counting connections is what makes the defect visible. Go's transport can only
+// return a connection to its pool once the response body has been consumed and
+// released; until then the connection is abandoned and the next request dials a new
+// one. Every request still succeeds, so nothing else about the loop looks wrong.
+func connectionCounter(handler http.HandlerFunc) (*httptest.Server, func() int) {
+	var mu sync.Mutex
+	count := 0
+
+	// Unstarted so ConnState is installed before the server goroutine reads Config;
+	// assigning it after NewServer would race with the running server.
+	server := httptest.NewUnstartedServer(handler)
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			mu.Lock()
+			count++
+			mu.Unlock()
+		}
+	}
+	server.Start()
+
+	return server, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return count
+	}
+}
+
+// countingHandler wraps handler so it records how many requests it has served and
+// cancels the loop once it has served enough.
+func countingHandler(want int, cancel func(), handler http.HandlerFunc) (http.HandlerFunc, func() int) {
+	var mu sync.Mutex
+	served := 0
+
+	return func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			served++
+			reached := served >= want
+			mu.Unlock()
+
+			if reached {
+				cancel()
+			}
+			handler(w, r)
+		}, func() int {
+			mu.Lock()
+			defer mu.Unlock()
+			return served
+		}
+}
+
+// TestEventLoopReusesConnectionsOnEventPush covers the push to LaunchDarkly in
+// eventLoop. It checks only the status code, leaving the body neither read nor
+// closed, so each push abandons its connection.
+//
+// This only happens when there are events to deliver: a drain that returns an empty
+// array skips the push entirely, so an idle org is unaffected.
+func TestEventLoopReusesConnectionsOnEventPush(t *testing.T) {
+	const wantPushes = 50
+
+	bridge := newTestBridge(t, "http://unused.invalid", "http://unused.invalid")
+	bridge.oauthCurrentToken = "test-token"
+	bridge.eventPollInterval = time.Millisecond
+
+	// A non-empty payload so the loop proceeds to the push on every cycle.
+	sfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"kind":"identify"}]`))
+	}))
+	defer sfServer.Close()
+	bridge.salesforceURL = sfServer.URL + "/"
+
+	handler, servedCount := countingHandler(wantPushes, bridge.cancel,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		})
+	ldServer, connectionCount := connectionCounter(handler)
+	defer ldServer.Close()
+	bridge.launchDarklyEventsURI = ldServer.URL
+
+	if err := bridge.eventLoop(); err != nil {
+		t.Fatalf("eventLoop returned unexpected error: %v", err)
+	}
+
+	served := servedCount()
+	if served < wantPushes {
+		t.Fatalf("only %d pushes completed, want at least %d", served, wantPushes)
+	}
+	if connections := connectionCount(); connections > allowedConnections {
+		t.Errorf("opened %d connections for %d event pushes (allowed %d); "+
+			"the push response is never consumed, so no connection can be reused",
+			connections, served, allowedConnections)
+	}
+}
+
+// TestFeatureLoopReusesConnectionsOnFlagPush covers the push to Salesforce in
+// featureLoop, which goes through requestWithOauth and has the same defect as the
+// event push: the status is inspected and the body is left open.
+//
+// This only happens when flag data actually changes. An unchanged poll returns 304
+// and skips the push, which is the steady state for most orgs.
+func TestFeatureLoopReusesConnectionsOnFlagPush(t *testing.T) {
+	const wantPushes = 50
+
+	bridge := newTestBridge(t, "http://unused.invalid", "http://unused.invalid")
+	bridge.oauthCurrentToken = "test-token"
+	bridge.flagPollInterval = time.Millisecond
+
+	// Flag data on every poll so the loop always proceeds to the push. Without an
+	// ETag the loop cannot short-circuit to 304.
+	ldServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"flags":{},"segments":{}}`))
+	}))
+	defer ldServer.Close()
+	bridge.launchDarklyBaseURI = ldServer.URL
+
+	handler, servedCount := countingHandler(wantPushes, bridge.cancel,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		})
+	sfServer, connectionCount := connectionCounter(handler)
+	defer sfServer.Close()
+	bridge.salesforceURL = sfServer.URL + "/"
+
+	if err := bridge.featureLoop(); err != nil {
+		t.Fatalf("featureLoop returned unexpected error: %v", err)
+	}
+
+	served := servedCount()
+	if served < wantPushes {
+		t.Fatalf("only %d pushes completed, want at least %d", served, wantPushes)
+	}
+	if connections := connectionCount(); connections > allowedConnections {
+		t.Errorf("opened %d connections for %d flag pushes (allowed %d); "+
+			"the push response is never consumed, so no connection can be reused",
+			connections, served, allowedConnections)
+	}
+}
+
+// TestFeatureLoopReusesConnectionsOnPollError covers the flag poll's failure path.
+// A non-200 is logged and the loop moves on without reading the body, so unlike the
+// 200 path -- which is drained by ioutil.ReadAll -- and the 304 path -- which has no
+// body to begin with -- an error response abandons its connection.
+//
+// A LaunchDarkly outage therefore turns every flag poll into a fresh connection, at
+// the moment the bridge is already degraded.
+func TestFeatureLoopReusesConnectionsOnPollError(t *testing.T) {
+	const wantPolls = 50
+
+	bridge := newTestBridge(t, "http://unused.invalid", "http://unused.invalid")
+	bridge.oauthCurrentToken = "test-token"
+	bridge.flagPollInterval = time.Millisecond
+
+	// A 500 carries a body, which is what distinguishes this from the bodyless 304.
+	handler, servedCount := countingHandler(wantPolls, bridge.cancel,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":"internal error"}`))
+		})
+	ldServer, connectionCount := connectionCounter(handler)
+	defer ldServer.Close()
+	bridge.launchDarklyBaseURI = ldServer.URL
+
+	if err := bridge.featureLoop(); err != nil {
+		t.Fatalf("featureLoop returned unexpected error: %v", err)
+	}
+
+	served := servedCount()
+	if served < wantPolls {
+		t.Fatalf("only %d polls completed, want at least %d", served, wantPolls)
+	}
+	if connections := connectionCount(); connections > allowedConnections {
+		t.Errorf("opened %d connections for %d failed flag polls (allowed %d); "+
+			"the error response body is never read, so no connection can be reused",
+			connections, served, allowedConnections)
+	}
+}
+
+// TestEventLoopReusesConnectionsOnPollError covers the event drain's failure path,
+// the counterpart to TestFeatureLoopReusesConnectionsOnPollError. A non-200 from
+// Salesforce is logged and the loop moves on without reading the body, so the
+// connection is abandoned.
+//
+// Unlike the two push cases this needs no event traffic to trigger: a bridge polling
+// a broken or misconfigured Salesforce endpoint abandons a connection on every cycle
+// while delivering nothing.
+func TestEventLoopReusesConnectionsOnPollError(t *testing.T) {
+	const wantPolls = 50
+
+	bridge := newTestBridge(t, "http://unused.invalid", "http://unused.invalid")
+	bridge.oauthCurrentToken = "test-token"
+	bridge.eventPollInterval = time.Millisecond
+
+	// A 500 rather than a 401 or 403, which would instead drive the re-auth path.
+	handler, servedCount := countingHandler(wantPolls, bridge.cancel,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":"salesforce error"}`))
+		})
+	sfServer, connectionCount := connectionCounter(handler)
+	defer sfServer.Close()
+	bridge.salesforceURL = sfServer.URL + "/"
+
+	if err := bridge.eventLoop(); err != nil {
+		t.Fatalf("eventLoop returned unexpected error: %v", err)
+	}
+
+	served := servedCount()
+	if served < wantPolls {
+		t.Fatalf("only %d polls completed, want at least %d", served, wantPolls)
+	}
+	if connections := connectionCount(); connections > allowedConnections {
+		t.Errorf("opened %d connections for %d failed event drains (allowed %d); "+
+			"the error response body is never read, so no connection can be reused",
+			connections, served, allowedConnections)
 	}
 }
