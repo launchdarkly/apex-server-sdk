@@ -26,13 +26,35 @@ import (
 )
 
 const (
-	LD_BASE_URI   = "https://sdk.launchdarkly.com"
-	LD_EVENTS_URI = "https://events.launchdarkly.com"
-	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
-	POLL_INTERVAL = 30 * time.Second
-	SDK_VERSION   = "1.5.1" // x-release-please-version
-	USER_AGENT    = "ApexServerClient/" + SDK_VERSION
-	HTTP_TIMEOUT  = 30 * time.Second
+	LD_BASE_URI           = "https://sdk.launchdarkly.com"
+	LD_EVENTS_URI         = "https://events.launchdarkly.com"
+	OAUTH_URI             = "https://login.salesforce.com/services/oauth2/token"
+	DEFAULT_POLL_INTERVAL = 30 * time.Second
+	SDK_VERSION           = "1.5.1" // x-release-please-version
+	USER_AGENT            = "ApexServerClient/" + SDK_VERSION
+	HTTP_TIMEOUT          = 30 * time.Second
+	// MIN_FLAG_POLL_INTERVAL is the shortest FLAG_POLL_INTERVAL the bridge honors,
+	// matching the minimum polling interval used across LaunchDarkly's server SDKs.
+	// A shorter configured value is clamped up to it.
+	//
+	// This must stay less than or equal to DEFAULT_POLL_INTERVAL. The fallback is
+	// range-checked along with everything else, so a minimum above the default would
+	// clamp the default itself and make it unreachable.
+	//
+	// EVENT_POLL_INTERVAL has no counterpart: draining events more often is a
+	// legitimate tradeoff against Salesforce API consumption, so its only rule is
+	// that the interval be positive.
+	MIN_FLAG_POLL_INTERVAL = 30 * time.Second
+	// EVENT_POLL_INTERVAL_WARN_THRESHOLD is the point below which a configured
+	// EVENT_POLL_INTERVAL earns a warning at startup. It is advisory only -- no floor
+	// is enforced, because whether a short interval is affordable depends on the org's
+	// edition and license count, which the bridge cannot know.
+	//
+	// 5s is where the cost stops being incidental against the smallest production
+	// allocation. Enterprise and Professional orgs start at 100,000 API calls per 24
+	// hours, and a 5s drain spends roughly 17,280 of them, about 17%. Below that the
+	// curve steepens fast: 2s is around 43% and 1s around 86% of the same allocation.
+	EVENT_POLL_INTERVAL_WARN_THRESHOLD = 5 * time.Second
 	// INSTANCE_ID_HEADER is the HTTP header used to identify this bridge instance for
 	// estimating server-connection-minutes when polling LaunchDarkly. Its value is a
 	// v4 UUID generated once per bridge process and constant for that process's lifetime.
@@ -58,9 +80,30 @@ type Bridge struct {
 	// LaunchDarkly-bound request (see INSTANCE_ID_HEADER) so the platform can estimate
 	// server-connection-minutes for polling clients.
 	instanceID string
-	lock       sync.Mutex
-	context    context.Context
-	cancel     context.CancelFunc
+	// eventPollInterval is how long eventLoop waits between drains of EventData__c,
+	// and flagPollInterval is how long featureLoop waits between flag polls. Both
+	// default to DEFAULT_POLL_INTERVAL and are configurable per loop.
+	eventPollInterval time.Duration
+	flagPollInterval  time.Duration
+	lock              sync.Mutex
+	context           context.Context
+	cancel            context.CancelFunc
+}
+
+func parseDurationFromEnv(name string, fallback time.Duration) time.Duration {
+	raw := os.Getenv(name)
+	if raw == "" {
+		log.Printf("%s is not set, using the default of %s", name, fallback)
+		return fallback
+	}
+
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		log.Printf("%s (%s) failed to parse to a duration, using %s", name, raw, fallback)
+		return fallback
+	}
+
+	return parsed
 }
 
 func newBridge() (*Bridge, error) {
@@ -147,6 +190,23 @@ func newBridge() (*Bridge, error) {
 			return nil, errors.New("HTTP_TIMEOUT must be >= 0")
 		}
 		httpTimeoutDuration = httpTimeout
+	}
+
+	bridge.eventPollInterval = parseDurationFromEnv("EVENT_POLL_INTERVAL", DEFAULT_POLL_INTERVAL)
+	if bridge.eventPollInterval <= 0 {
+		log.Printf("%s duration (%s) is non-positive, using %s", "EVENT_POLL_INTERVAL", bridge.eventPollInterval, DEFAULT_POLL_INTERVAL)
+		bridge.eventPollInterval = DEFAULT_POLL_INTERVAL
+	}
+
+	if bridge.eventPollInterval < EVENT_POLL_INTERVAL_WARN_THRESHOLD {
+		log.Printf("event flush interval is %s, polling may trigger organization wide API limits",
+			bridge.eventPollInterval)
+	}
+
+	bridge.flagPollInterval = parseDurationFromEnv("FLAG_POLL_INTERVAL", DEFAULT_POLL_INTERVAL)
+	if bridge.flagPollInterval < MIN_FLAG_POLL_INTERVAL {
+		log.Printf("%s duration (%s) is less than the minimum of %s, using %s", "FLAG_POLL_INTERVAL", bridge.flagPollInterval, MIN_FLAG_POLL_INTERVAL, MIN_FLAG_POLL_INTERVAL)
+		bridge.flagPollInterval = MIN_FLAG_POLL_INTERVAL
 	}
 
 	bridge.client = http.Client{
@@ -336,7 +396,6 @@ func (bridge *Bridge) eventLoop() error {
 			log.Print("pushing events to: " + pushURI)
 
 			pushResponse, err := bridge.client.Do(pushRequest)
-
 			if err != nil {
 				log.Print("failed pushing events to LaunchDarkly")
 				goto End
@@ -353,18 +412,18 @@ func (bridge *Bridge) eventLoop() error {
 		}
 
 	End:
-		log.Print("event polling waiting for: ", POLL_INTERVAL)
+		log.Print("event polling waiting for: ", bridge.eventPollInterval)
 
 		select {
 		case <-bridge.context.Done():
 			return nil
-		case <-time.After(POLL_INTERVAL):
+		case <-time.After(bridge.eventPollInterval):
 		}
 	}
 }
 
 func (bridge *Bridge) featureLoop() error {
-	var etag = ""
+	etag := ""
 
 	pollURI := bridge.launchDarklyBaseURI + "/sdk/latest-all"
 
@@ -441,12 +500,12 @@ func (bridge *Bridge) featureLoop() error {
 		}
 
 	End:
-		log.Print("feature polling waiting for: ", POLL_INTERVAL)
+		log.Print("feature polling waiting for: ", bridge.flagPollInterval)
 
 		select {
 		case <-bridge.context.Done():
 			return nil
-		case <-time.After(POLL_INTERVAL):
+		case <-time.After(bridge.flagPollInterval):
 		}
 	}
 }
