@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -734,5 +735,66 @@ func TestEventLoopReusesConnectionsOnPollError(t *testing.T) {
 		t.Errorf("opened %d connections for %d failed event drains (allowed %d); "+
 			"the error response body is never read, so no connection can be reused",
 			connections, served, allowedConnections)
+	}
+}
+
+// TestEventLoopStreamsLargeErrorBodies pins the streaming half of drainAndClose.
+//
+// The connection-reuse tests above cannot catch a regression here. They pass whether
+// the body is streamed to ioutil.Discard or read into memory with ioutil.ReadAll,
+// because both reach EOF and so both restore connection pooling. Allocation volume is
+// the only thing that separates the two, so without this test a change to ReadAll
+// looks entirely correct.
+func TestEventLoopStreamsLargeErrorBodies(t *testing.T) {
+	const (
+		wantPolls = 50
+		bodySize  = 1 << 20 // 1 MiB of error body per response
+		// io.Discard implements ReaderFrom and copies through a small pooled buffer,
+		// so the whole run costs far less than one body. Buffering each body instead
+		// would allocate at least wantPolls*bodySize, i.e. 50 MiB. With three orders
+		// of magnitude between the two outcomes this ceiling is generous enough not
+		// to flake while still failing decisively on a regression.
+		maxTotalAlloc = 20 << 20 // 20 MiB
+	)
+
+	body := bytes.Repeat([]byte("x"), bodySize)
+
+	bridge := newTestBridge(t, "http://unused.invalid", "http://unused.invalid")
+	bridge.oauthCurrentToken = "test-token"
+	bridge.eventPollInterval = time.Millisecond
+
+	// A 500 rather than a 401 or 403, which would instead drive the re-auth path.
+	handler, servedCount := countingHandler(wantPolls, bridge.cancel,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(body)
+		})
+	sfServer := httptest.NewServer(handler)
+	defer sfServer.Close()
+	bridge.salesforceURL = sfServer.URL + "/"
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	if err := bridge.eventLoop(); err != nil {
+		t.Fatalf("eventLoop returned unexpected error: %v", err)
+	}
+
+	runtime.ReadMemStats(&after)
+
+	served := servedCount()
+	if served < wantPolls {
+		t.Fatalf("only %d polls completed, want at least %d", served, wantPolls)
+	}
+
+	// TotalAlloc is cumulative, so it measures what was allocated regardless of what
+	// the collector has since reclaimed. HeapAlloc would be at the mercy of GC timing.
+	allocated := after.TotalAlloc - before.TotalAlloc
+	t.Logf("allocated %d bytes draining %d responses of %d bytes each", allocated, served, bodySize)
+	if allocated > maxTotalAlloc {
+		t.Errorf("allocated %d bytes draining %d error responses of %d bytes each (ceiling %d); "+
+			"drainAndClose is buffering bodies instead of streaming them",
+			allocated, served, bodySize, maxTotalAlloc)
 	}
 }
