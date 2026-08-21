@@ -31,6 +31,11 @@ export OAUTH_PASSWORD='Your Salesforce password + security token'
 # such as: 'mypasswordmysalesforcesecuritytoken'
 
 # optional configuration options
+export LD_PROJECT_KEY='Your LaunchDarkly project key'
+# such as: 'gps'
+# scopes this bridge to one LaunchDarkly project within the Salesforce org
+# if not set, the bridge owns records that carry no project
+# refer to "Multiple projects" below -- the Apex client must use the same value
 export OAUTH_URI='YOUR OAUTH URI'
 # if not set, defaults to: 'https://login.salesforce.com/services/oauth2/token'
 # if authenticating against sandbox, use: 'https://test.salesforce.com/services/oauth2/token'
@@ -46,6 +51,66 @@ export FLAG_POLL_INTERVAL='How often to poll LaunchDarkly for flag data'
 # if not set or unparseable, defaults to: '30s'
 # minimum is '30s'; anything shorter is clamped up to '30s'
 ```
+
+## Multiple projects
+
+A single Salesforce org can hold flag data for more than one LaunchDarkly project. Run one
+bridge per project, and give the bridge and the Apex client the *same* project key:
+
+```bash
+export LD_PROJECT_KEY='gps'
+```
+
+```apex
+LDConfig config = new LDConfig.Builder()
+    .setProjectKey('gps')
+    .build();
+LDClient client = new LDClient(config);
+```
+
+The bridge sends its key to Salesforce as an `LD-Project-Key` header, and the Apex side scopes
+every read, write and delete to it. Leaving both unset is the default and scopes everything to
+records carrying no project, which is how the SDK behaved before this option existed.
+
+**The two values must agree.** A mismatch produces no error. Evaluation simply finds no flag
+data for the configured project and every variation call returns its fallback, so check the
+bridge's startup log, which reports the key in effect.
+
+Source the project key from one place in your Apex -- a custom setting or a single constant --
+rather than at each call site. A partial rollout where some entry points name the project and
+others do not is the one state the migration below does not account for.
+
+### Migrating an existing deployment
+
+Nothing needs backfilling: the bridge replaces all of a project's flag data on every push, and
+queued events are drained continuously, so records are replaced rather than migrated.
+
+1. Deploy the new Apex with no project key configured. This changes nothing -- reads still
+   match the records your current bridge writes.
+2. Leave the existing bridge running, and start a second one with `LD_PROJECT_KEY` set. The two
+   coexist safely: each owns its own records and neither deletes the other's.
+3. Set the same key on the Apex client. Its data is already populated by step 2, so there is no
+   window where evaluation falls back.
+4. Keep both bridges running until the events that carry no project have drained. No new ones
+   are created once step 3 lands.
+5. Stop the original bridge.
+6. Delete the leftover flag data that carries no project:
+
+   ```apex
+   delete [SELECT Id FROM VersionedData__c WHERE Project__c = null LIMIT 10000];
+   ```
+
+Two details in that order are load-bearing:
+
+- **Step 5 must come before step 6.** Delete those records while the original bridge is still
+  running and its next push recreates them.
+- **Do not stop the original bridge before step 4 finishes.** Nothing else drains events that
+  carry no project, and undrained events count against that scope's `maxEventsInQueue` forever.
+
+Step 6 is a manual step by design. Each bridge only ever deletes its own project's records, so
+records left behind by a decommissioned bridge are not cleaned up for you. The `LIMIT` is there
+because a single DML delete is capped at 10,000 rows; repeat it, or use Batch Apex, if you have
+more than that.
 
 ## Polling intervals
 
