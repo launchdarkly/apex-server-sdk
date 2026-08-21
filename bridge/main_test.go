@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -199,7 +201,7 @@ func setMinimalBridgeEnv(t *testing.T) {
 	setEnv(t, "OAUTH_USERNAME", "test@example.invalid")
 	setEnv(t, "OAUTH_PASSWORD", "test-password")
 	setEnv(t, "OAUTH_SECRET", "test-secret")
-	for _, name := range []string{"OAUTH_JWT_KEY", "OAUTH_URI", "HTTP_TIMEOUT", "LD_BASE_URI", "LD_EVENTS_URI"} {
+	for _, name := range []string{"OAUTH_JWT_KEY", "OAUTH_URI", "HTTP_TIMEOUT", "LD_BASE_URI", "LD_EVENTS_URI", "OAUTH_GRANT_TYPE"} {
 		unsetEnv(t, name)
 	}
 }
@@ -734,5 +736,191 @@ func TestEventLoopReusesConnectionsOnPollError(t *testing.T) {
 		t.Errorf("opened %d connections for %d failed event drains (allowed %d); "+
 			"the error response body is never read, so no connection can be reused",
 			connections, served, allowedConnections)
+	}
+}
+
+func TestResolveGrantType(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured string
+		setEnvVar  bool
+		jwtKey     string
+		want       string
+		wantErr    bool
+	}{
+		// Unset falls back to inference, which is how the bridge behaved before
+		// OAUTH_GRANT_TYPE existed. Every deployment predating it keeps working.
+		{name: "unset with a jwt key infers jwt bearer", jwtKey: "not-empty", want: GRANT_JWT_BEARER},
+		{name: "unset without a jwt key infers password", want: GRANT_PASSWORD},
+
+		{name: "explicit jwt bearer", configured: GRANT_JWT_BEARER, setEnvVar: true, want: GRANT_JWT_BEARER},
+		{name: "explicit client credentials", configured: GRANT_CLIENT_CREDENTIALS, setEnvVar: true, want: GRANT_CLIENT_CREDENTIALS},
+		{name: "explicit password", configured: GRANT_PASSWORD, setEnvVar: true, want: GRANT_PASSWORD},
+
+		// Client credentials cannot be inferred: its credentials are a subset of the
+		// password grant's, so an explicit choice must override a present JWT key.
+		{
+			name:       "explicit choice overrides a present jwt key",
+			configured: GRANT_CLIENT_CREDENTIALS,
+			setEnvVar:  true,
+			jwtKey:     "not-empty",
+			want:       GRANT_CLIENT_CREDENTIALS,
+		},
+
+		{name: "case and surrounding whitespace are tolerated", configured: "  Client-Credentials  ", setEnvVar: true, want: GRANT_CLIENT_CREDENTIALS},
+
+		// A typo must stop startup rather than silently selecting a different flow.
+		{name: "unrecognized value is an error", configured: "client_credentials", setEnvVar: true, wantErr: true},
+		{name: "nonsense is an error", configured: "oauth", setEnvVar: true, wantErr: true},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			if test.setEnvVar {
+				setEnv(t, "OAUTH_GRANT_TYPE", test.configured)
+			} else {
+				unsetEnv(t, "OAUTH_GRANT_TYPE")
+			}
+
+			got, err := resolveGrantType(test.jwtKey)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error for %q, got grant %q", test.configured, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveGrantType returned unexpected error: %v", err)
+			}
+			if got != test.want {
+				t.Errorf("grant = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// TestClientCredentialsNeedsNoUsername is the point of the whole change: the run-as identity
+// lives on the app in Salesforce, so the daemon holds no user credential. If this starts
+// failing, the per-grant validation has regressed into requiring a username again.
+func TestClientCredentialsNeedsNoUsername(t *testing.T) {
+	setMinimalBridgeEnv(t)
+	setEnv(t, "OAUTH_GRANT_TYPE", GRANT_CLIENT_CREDENTIALS)
+	unsetEnv(t, "OAUTH_USERNAME")
+	unsetEnv(t, "OAUTH_PASSWORD")
+
+	bridge, err := newBridge()
+	if err != nil {
+		t.Fatalf("newBridge rejected a valid client credentials configuration: %v", err)
+	}
+	if bridge.oauthGrantType != GRANT_CLIENT_CREDENTIALS {
+		t.Errorf("grant = %q, want %q", bridge.oauthGrantType, GRANT_CLIENT_CREDENTIALS)
+	}
+}
+
+func TestGrantValidationIsPerGrant(t *testing.T) {
+	tests := []struct {
+		name    string
+		grant   string
+		unset   []string
+		wantErr bool
+	}{
+		{name: "client credentials without a secret", grant: GRANT_CLIENT_CREDENTIALS, unset: []string{"OAUTH_SECRET"}, wantErr: true},
+		{name: "client credentials without a password is fine", grant: GRANT_CLIENT_CREDENTIALS, unset: []string{"OAUTH_PASSWORD"}},
+		{name: "jwt bearer without a key", grant: GRANT_JWT_BEARER, unset: []string{"OAUTH_JWT_KEY"}, wantErr: true},
+		{name: "password without a username", grant: GRANT_PASSWORD, unset: []string{"OAUTH_USERNAME"}, wantErr: true},
+		{name: "password without a password", grant: GRANT_PASSWORD, unset: []string{"OAUTH_PASSWORD"}, wantErr: true},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			setMinimalBridgeEnv(t)
+			setEnv(t, "OAUTH_GRANT_TYPE", test.grant)
+			for _, name := range test.unset {
+				unsetEnv(t, name)
+			}
+
+			_, err := newBridge()
+			if test.wantErr && err == nil {
+				t.Error("expected newBridge to reject the configuration, it succeeded")
+			}
+			if !test.wantErr && err != nil {
+				t.Errorf("newBridge returned unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestAuthorizeSalesforcePostsTheRightForm asserts the wire contract for each grant, since
+// that is what Salesforce actually validates. The client credentials case additionally
+// asserts the absence of username and password: sending a user credential on a grant that
+// does not take one is the mistake worth catching.
+func TestAuthorizeSalesforcePostsTheRightForm(t *testing.T) {
+	tests := []struct {
+		name        string
+		grant       string
+		wantGrant   string
+		wantPresent []string
+		wantAbsent  []string
+	}{
+		{
+			name:        "client credentials",
+			grant:       GRANT_CLIENT_CREDENTIALS,
+			wantGrant:   "client_credentials",
+			wantPresent: []string{"client_id", "client_secret"},
+			wantAbsent:  []string{"username", "password", "assertion"},
+		},
+		{
+			name:        "password",
+			grant:       GRANT_PASSWORD,
+			wantGrant:   "password",
+			wantPresent: []string{"client_id", "client_secret", "username", "password"},
+			wantAbsent:  []string{"assertion"},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			var posted url.Values
+
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := ioutil.ReadAll(r.Body)
+				posted, _ = url.ParseQuery(string(body))
+				_, _ = w.Write([]byte(`{"access_token":"test-token"}`))
+			}))
+			defer tokenServer.Close()
+
+			setMinimalBridgeEnv(t)
+			setEnv(t, "OAUTH_GRANT_TYPE", test.grant)
+			setEnv(t, "OAUTH_URI", tokenServer.URL)
+
+			bridge, err := newBridge()
+			if err != nil {
+				t.Fatalf("newBridge returned unexpected error: %v", err)
+			}
+
+			if err, _ := bridge.authorizeSalesforce(); err != nil {
+				t.Fatalf("authorizeSalesforce returned unexpected error: %v", err)
+			}
+
+			if got := posted.Get("grant_type"); got != test.wantGrant {
+				t.Errorf("grant_type = %q, want %q", got, test.wantGrant)
+			}
+			for _, name := range test.wantPresent {
+				if posted.Get(name) == "" {
+					t.Errorf("%s missing from the token request", name)
+				}
+			}
+			for _, name := range test.wantAbsent {
+				if _, ok := posted[name]; ok {
+					t.Errorf("%s was sent on the %s grant and should not have been", name, test.grant)
+				}
+			}
+			if bridge.oauthCurrentToken != "test-token" {
+				t.Errorf("token = %q, want %q", bridge.oauthCurrentToken, "test-token")
+			}
+		})
 	}
 }

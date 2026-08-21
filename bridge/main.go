@@ -27,13 +27,27 @@ import (
 )
 
 const (
-	LD_BASE_URI           = "https://sdk.launchdarkly.com"
-	LD_EVENTS_URI         = "https://events.launchdarkly.com"
-	OAUTH_URI             = "https://login.salesforce.com/services/oauth2/token"
-	DEFAULT_POLL_INTERVAL = 30 * time.Second
-	SDK_VERSION           = "1.5.1" // x-release-please-version
-	USER_AGENT            = "ApexServerClient/" + SDK_VERSION
-	HTTP_TIMEOUT          = 30 * time.Second
+	LD_BASE_URI   = "https://sdk.launchdarkly.com"
+	LD_EVENTS_URI = "https://events.launchdarkly.com"
+	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
+	// The OAuth flows the bridge can use to authenticate to Salesforce, as accepted by
+	// OAUTH_GRANT_TYPE.
+	//
+	// GRANT_CLIENT_CREDENTIALS is the one to prefer for a new deployment: it needs no
+	// certificate to generate or rotate, no username -- the run-as identity is designated
+	// on the app in Salesforce -- and it sends no time-bound assertion, so it is
+	// indifferent to host clock skew.
+	//
+	// GRANT_PASSWORD is deprecated. Salesforce disables the username-password flow by
+	// default on new orgs and is retiring it, and it requires a security token appended to
+	// the password.
+	GRANT_JWT_BEARER         = "jwt-bearer"
+	GRANT_CLIENT_CREDENTIALS = "client-credentials"
+	GRANT_PASSWORD           = "password"
+	DEFAULT_POLL_INTERVAL    = 30 * time.Second
+	SDK_VERSION              = "1.5.1" // x-release-please-version
+	USER_AGENT               = "ApexServerClient/" + SDK_VERSION
+	HTTP_TIMEOUT             = 30 * time.Second
 	// MIN_FLAG_POLL_INTERVAL is the shortest FLAG_POLL_INTERVAL the bridge honors,
 	// matching the minimum polling interval used across LaunchDarkly's server SDKs.
 	// A shorter configured value is clamped up to it.
@@ -76,7 +90,9 @@ type Bridge struct {
 	oauthPassword         string
 	oauthCurrentToken     string
 	oauthJWTKey           *rsa.PrivateKey
-	oauthURI              url.URL
+	// oauthGrantType is the resolved OAuth flow, always one of the GRANT_ constants.
+	oauthGrantType string
+	oauthURI       url.URL
 	// instanceID is a v4 UUID generated once per bridge process. It is sent on every
 	// LaunchDarkly-bound request (see INSTANCE_ID_HEADER) so the platform can estimate
 	// server-connection-minutes for polling clients.
@@ -105,6 +121,35 @@ func parseDurationFromEnv(name string, fallback time.Duration) time.Duration {
 	}
 
 	return parsed
+}
+
+// resolveGrantType decides which OAuth flow to use.
+//
+// An explicit OAUTH_GRANT_TYPE always wins. When it is unset the flow is inferred from the
+// credentials present, which is exactly how the bridge behaved before the variable existed:
+// a JWT key means the JWT bearer grant, and its absence means the password grant. That keeps
+// every deployment predating this option working untouched.
+//
+// Inference cannot be extended to the client credentials grant, because its credentials --
+// OAUTH_ID and OAUTH_SECRET -- are a subset of the password grant's. Selecting it therefore
+// requires saying so, which is the reason the variable exists.
+func resolveGrantType(oauthJWTKey string) (string, error) {
+	configured := strings.ToLower(strings.TrimSpace(os.Getenv("OAUTH_GRANT_TYPE")))
+
+	if configured == "" {
+		if oauthJWTKey != "" {
+			return GRANT_JWT_BEARER, nil
+		}
+		return GRANT_PASSWORD, nil
+	}
+
+	switch configured {
+	case GRANT_JWT_BEARER, GRANT_CLIENT_CREDENTIALS, GRANT_PASSWORD:
+		return configured, nil
+	}
+
+	return "", errors.New("OAUTH_GRANT_TYPE '" + configured + "' is not recognized; use " +
+		GRANT_JWT_BEARER + ", " + GRANT_CLIENT_CREDENTIALS + " or " + GRANT_PASSWORD)
 }
 
 func newBridge() (*Bridge, error) {
@@ -147,16 +192,26 @@ func newBridge() (*Bridge, error) {
 	bridge.oauthURI = *oauthURI
 
 	oauthJWTKey := os.Getenv("OAUTH_JWT_KEY")
-	if oauthJWTKey == "" {
-		bridge.oauthPassword = os.Getenv("OAUTH_PASSWORD")
-		if bridge.oauthPassword == "" {
-			return nil, errors.New("OAUTH_PASSWORD not set")
+
+	grantType, err := resolveGrantType(oauthJWTKey)
+	if err != nil {
+		return nil, err
+	}
+	bridge.oauthGrantType = grantType
+	log.Printf("authenticating to Salesforce with the %s grant", grantType)
+	if grantType == GRANT_PASSWORD {
+		log.Print("the password grant is deprecated: Salesforce disables it by default on new " +
+			"orgs and is retiring it. Prefer " + GRANT_CLIENT_CREDENTIALS + " or " + GRANT_JWT_BEARER)
+	}
+
+	// Each grant needs a different subset of the OAUTH_ variables, so they are validated per
+	// grant rather than unconditionally. In particular the client credentials grant needs no
+	// username: the run-as identity is designated on the app in Salesforce.
+	switch grantType {
+	case GRANT_JWT_BEARER:
+		if oauthJWTKey == "" {
+			return nil, errors.New("OAUTH_JWT_KEY not set")
 		}
-		bridge.oauthSecret = os.Getenv("OAUTH_SECRET")
-		if bridge.oauthSecret == "" {
-			return nil, errors.New("OAUTH_SECRET not set")
-		}
-	} else {
 		decodedString, err := base64.StdEncoding.DecodeString(oauthJWTKey)
 		if err != nil {
 			return nil, errors.New("OAUTH_JWT_KEY is not valid standard-encoding base64")
@@ -173,11 +228,30 @@ func newBridge() (*Bridge, error) {
 			return nil, errors.New("OAUTH_JWT_KEY failed to decode PKCS1 private key from PEM bytes")
 		}
 		bridge.oauthJWTKey = decodedX509
-	}
 
-	bridge.oauthUsername = os.Getenv("OAUTH_USERNAME")
-	if bridge.oauthUsername == "" {
-		return nil, errors.New("OAUTH_USERNAME not set")
+		bridge.oauthUsername = os.Getenv("OAUTH_USERNAME")
+		if bridge.oauthUsername == "" {
+			return nil, errors.New("OAUTH_USERNAME not set")
+		}
+	case GRANT_CLIENT_CREDENTIALS:
+		bridge.oauthSecret = os.Getenv("OAUTH_SECRET")
+		if bridge.oauthSecret == "" {
+			return nil, errors.New("OAUTH_SECRET not set")
+		}
+	case GRANT_PASSWORD:
+		bridge.oauthPassword = os.Getenv("OAUTH_PASSWORD")
+		if bridge.oauthPassword == "" {
+			return nil, errors.New("OAUTH_PASSWORD not set")
+		}
+		bridge.oauthSecret = os.Getenv("OAUTH_SECRET")
+		if bridge.oauthSecret == "" {
+			return nil, errors.New("OAUTH_SECRET not set")
+		}
+
+		bridge.oauthUsername = os.Getenv("OAUTH_USERNAME")
+		if bridge.oauthUsername == "" {
+			return nil, errors.New("OAUTH_USERNAME not set")
+		}
 	}
 
 	httpTimeoutDuration := HTTP_TIMEOUT
@@ -269,19 +343,30 @@ func (bridge *Bridge) makeJWT() (*string, error) {
 
 func (bridge *Bridge) authorizeSalesforce() (error, bool) {
 	query := url.Values{}
-	if bridge.oauthJWTKey != nil {
+	switch bridge.oauthGrantType {
+	case GRANT_JWT_BEARER:
 		jwt, err := bridge.makeJWT()
 		if err != nil {
 			return err, true
 		}
 		query.Add("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
 		query.Add("assertion", *jwt)
-	} else {
+	case GRANT_CLIENT_CREDENTIALS:
+		// No username: the app in Salesforce designates the run-as identity, so the
+		// daemon holds no user credential at all.
+		query.Add("grant_type", "client_credentials")
+		query.Add("client_id", bridge.oauthId)
+		query.Add("client_secret", bridge.oauthSecret)
+	case GRANT_PASSWORD:
 		query.Add("grant_type", "password")
 		query.Add("client_id", bridge.oauthId)
 		query.Add("client_secret", bridge.oauthSecret)
 		query.Add("username", bridge.oauthUsername)
 		query.Add("password", bridge.oauthPassword)
+	default:
+		// newBridge resolves the grant to one of the constants above and refuses to start
+		// otherwise, so reaching here means the two have drifted apart.
+		return errors.New("unsupported OAuth grant type '" + bridge.oauthGrantType + "'"), true
 	}
 
 	authRequest, err := http.NewRequest("POST", bridge.oauthURI.String(), strings.NewReader(query.Encode()))
