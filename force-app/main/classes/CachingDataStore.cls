@@ -7,13 +7,23 @@ public class CachingDataStore implements DataStoreInterface {
   private final Integer ttl;
   private Long cachedAt;
 
+  // Refer to the note in DataStore: bound here, not per call, so Evaluator's prerequisite
+  // and segment lookups stay inside one project.
+  private final String project;
+
+  // Retained so existing callers keep compiling.
   public CachingDataStore(Integer ttl, GetTimeInterface getTime) {
+    this(ttl, getTime, null);
+  }
+
+  public CachingDataStore(Integer ttl, GetTimeInterface getTime, String project) {
     System.assertNotEquals(ttl, null);
 
     this.getTime = getTime;
 
     this.ttl = ttl;
     this.cachedAt = null;
+    this.project = project;
   }
 
   private void loadCache() {
@@ -32,6 +42,7 @@ public class CachingDataStore implements DataStoreInterface {
     List<VersionedData__c> versionedData = [
       SELECT Version__c, Raw__c, Key__c, Kind__c
       FROM VersionedData__c
+      WHERE Project__c = :project
     ];
 
     for (VersionedData__C datum : versionedData) {
@@ -55,7 +66,7 @@ public class CachingDataStore implements DataStoreInterface {
     List<VersionedData__c> versioned = [
       SELECT Version__c, Raw__c, Key__c, Kind__c
       FROM VersionedData__c
-      WHERE Key__c = :key AND Kind__c = :kind
+      WHERE Key__c = :key AND Kind__c = :kind AND Project__c = :project
       LIMIT 1
     ];
 
@@ -82,8 +93,13 @@ public class CachingDataStore implements DataStoreInterface {
   }
 
   public void putAll(Map<String, Object> kinds) {
-    // delete existing store values
-    List<VersionedData__c> existingFeatures = [SELECT Key__c FROM VersionedData__C];
+    // Delete only this project's store values. An unscoped delete here would wipe every
+    // other project's flag data on every push.
+    List<VersionedData__c> existingFeatures = [
+      SELECT Key__c
+      FROM VersionedData__c
+      WHERE Project__c = :project
+    ];
     delete existingFeatures;
 
     // iterate over kinds of features such as flags / segments
@@ -92,7 +108,7 @@ public class CachingDataStore implements DataStoreInterface {
 
       for (String key : features.keySet()) {
         Map<String, Object> feature = (Map<String, Object>) features.get(key);
-        VersionedData versioned = new VersionedData(kind, feature);
+        VersionedData versioned = new VersionedData(kind, feature, this.project);
 
         this.insertVersionedData(versioned);
       }

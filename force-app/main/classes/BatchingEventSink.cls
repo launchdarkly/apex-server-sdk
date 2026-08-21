@@ -2,11 +2,21 @@ public class BatchingEventSink implements EventSinkInterface {
   List<EventData__c> events;
   Integer maxEvents;
 
+  // The project events written by this sink belong to. The cap here is an in-memory
+  // counter scoped to this instance, so it needs no query to stay per-project.
+  private final String project;
+
+  // Retained so existing callers keep compiling.
   public BatchingEventSink(Integer maxEvents) {
+    this(maxEvents, null);
+  }
+
+  public BatchingEventSink(Integer maxEvents, String project) {
     System.assertNotEquals(maxEvents, null);
 
     this.maxEvents = maxEvents;
     this.events = new List<EventData__c>();
+    this.project = project;
   }
 
   public void sinkIdentify(LDEvent.Identify event) {
@@ -33,6 +43,7 @@ public class BatchingEventSink implements EventSinkInterface {
     EventData__c record = new EventData__c();
     record.Kind__c = kind;
     record.Raw__c = raw;
+    record.Project__c = this.project;
 
     this.events.add(record);
   }

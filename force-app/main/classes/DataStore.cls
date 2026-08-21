@@ -1,12 +1,27 @@
 public class DataStore implements DataStoreInterface {
+  // The LaunchDarkly project this store is scoped to. Null scopes it to records with no
+  // project, which is what an org looks like before multi-project support and what a
+  // bridge running without a project key continues to write.
+  //
+  // The project is bound here rather than passed per call so that every path through
+  // Evaluator -- including prerequisite and segment lookups, which are made by key alone
+  // -- stays within one project without Evaluator needing to know projects exist.
+  private final String project;
+
+  // Retained so existing callers keep compiling.
   public DataStore() {
+    this(null);
+  }
+
+  public DataStore(String project) {
+    this.project = project;
   }
 
   public VersionedData__C getVersioned(String key, String kind) {
     List<VersionedData__c> versioned = [
       SELECT Version__c, Raw__c, Key__c, Kind__c
       FROM VersionedData__c
-      WHERE Key__c = :key AND Kind__c = :kind
+      WHERE Key__c = :key AND Kind__c = :kind AND Project__c = :project
       LIMIT 1
     ];
 
@@ -43,7 +58,7 @@ public class DataStore implements DataStoreInterface {
     List<VersionedData__c> flags = [
       SELECT Version__c, Raw__c, Key__c, Kind__c
       FROM VersionedData__c
-      WHERE Kind__c = 'flags'
+      WHERE Kind__c = 'flags' AND Project__c = :project
     ];
 
     for (VersionedData__C flag : flags) {
@@ -58,8 +73,9 @@ public class DataStore implements DataStoreInterface {
   }
 
   public void putAll(Map<String, Object> kinds) {
-    // delete existing store values
-    delete [SELECT Key__c FROM VersionedData__c];
+    // Delete only this project's store values. An unscoped delete here would wipe every
+    // other project's flag data on every push.
+    delete [SELECT Key__c FROM VersionedData__c WHERE Project__c = :project];
 
     List<VersionedData__c> versionData = new List<VersionedData__c>();
 
@@ -70,7 +86,7 @@ public class DataStore implements DataStoreInterface {
       for (String key : features.keySet()) {
         Map<String, Object> feature = (Map<String, Object>) features.get(key);
 
-        VersionedData versioned = new VersionedData(kind, feature);
+        VersionedData versioned = new VersionedData(kind, feature, this.project);
 
         versionData.add(versioned.getSObject());
       }
