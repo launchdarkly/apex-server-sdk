@@ -2,7 +2,7 @@
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
     <fullName>Project__c</fullName>
     <description>LaunchDarkly project key this record belongs to. Null means the record predates multi-project support, or the bridge and SDK are running without an explicit project key.</description>
-    <externalId>true</externalId>
+    <externalId>false</externalId>
     <label>LaunchDarkly project</label>
     <required>false</required>
     <trackTrending>false</trackTrending>
