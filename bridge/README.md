@@ -4,8 +4,9 @@ This daemon is used to ensure LaunchDarkly and the Salesforce SDK stay synchroni
 
 ## Configuration
 
-The daemon uses environment variables for configuration. You must configure either the JWT or password based authentication.
-JWT authentication is recommended but password authentication is easier for testing.
+The daemon uses environment variables for configuration. Refer to
+[Authentication](#authentication) for choosing a flow; **client credentials** is the one to
+prefer for a new deployment.
 
 ```bash
 # The secrets in this example are randomly generated
@@ -17,16 +18,26 @@ export SALESFORCE_URL='Your Salesforce Apex REST URL'
 # such as: 'https://na123.salesforce.com/services/apexrest/'
 export OAUTH_ID='Your Salesforce OAuth Id'
 # such as: 'BfBGjyY0.8XTDtB6enx5WXSATZ6mhPhnn.V2xK2Q8aYIW7KBS4r.7RA5QDbhaVOc4swvGZUqao-4X2S6Z-MdP'
+
+# which OAuth flow to use: 'client-credentials', 'jwt-bearer' or 'password'
+export OAUTH_GRANT_TYPE='client-credentials'
+# if not set, the flow is inferred: JWT bearer when OAUTH_JWT_KEY is set, otherwise password
+# client credentials cannot be inferred and must be requested explicitly
+
+# when using client credentials
+export OAUTH_SECRET='Your Salesforce OAuth secret'
+# such as: '1193EEA95E6E26978D5BA60B103CC419FB653E314EA5BF282BDD1D429769685E'
+# no username: the run-as identity is designated on the app in Salesforce
+
+# when using JWT bearer
+export OAUTH_JWT_KEY='Your RSA private key in PEM format base64 encoded'
+# such as: cat private.key | base64 -w 0
 export OAUTH_USERNAME='Your Salesforce username'
 # such as: 'address@example.com'
 
-# when utilizing JWT based auth
-export OAUTH_JWT_KEY='Your RSA private key in PEM format base64 encoded'
-# such as: cat private.key | base64 -w 0
-
-# when utilizing password based auth
+# when using password auth (deprecated)
 export OAUTH_SECRET='Your Salesforce OAuth secret'
-# such as: '1193EEA95E6E26978D5BA60B103CC419FB653E314EA5BF282BDD1D429769685E'
+export OAUTH_USERNAME='Your Salesforce username'
 export OAUTH_PASSWORD='Your Salesforce password + security token'
 # such as: 'mypasswordmysalesforcesecuritytoken'
 
@@ -46,6 +57,51 @@ export FLAG_POLL_INTERVAL='How often to poll LaunchDarkly for flag data'
 # if not set or unparseable, defaults to: '30s'
 # minimum is '30s'; anything shorter is clamped up to '30s'
 ```
+
+## Authentication
+
+Three OAuth flows are supported. Set `OAUTH_GRANT_TYPE` to choose one; the resolved flow is
+logged at startup, which is the quickest way to confirm what the daemon is actually doing.
+
+| Flow | `OAUTH_GRANT_TYPE` | Needs | Use it when |
+| --- | --- | --- | --- |
+| Client credentials | `client-credentials` | `OAUTH_ID`, `OAUTH_SECRET` | Default choice for a new deployment |
+| JWT bearer | `jwt-bearer` | `OAUTH_ID`, `OAUTH_USERNAME`, `OAUTH_JWT_KEY` | You need to act as a specific user, or policy requires a certificate |
+| Password | `password` | `OAUTH_ID`, `OAUTH_SECRET`, `OAUTH_USERNAME`, `OAUTH_PASSWORD` | Deprecated -- avoid |
+
+**Prefer client credentials.** It needs no certificate to generate, upload or rotate, and no
+username -- the run-as identity is designated on the connected app or External Client App in
+Salesforce, so the daemon holds no user credential at all. It also sends no time-bound
+assertion, which makes it indifferent to host clock skew.
+
+That last point is worth knowing if you run the bridge on a VM. The JWT bearer flow signs an
+assertion that expires 120 seconds after it is issued, with no tolerance, so a host whose clock
+has drifted more than two minutes will fail every authentication attempt. There is no
+corresponding failure mode with client credentials.
+
+Enable the flow on the app in Salesforce before configuring it here. On an External Client App
+that is the **Enable Client Credentials Flow** setting, and it requires a run-as user to be
+designated.
+
+**JWT bearer** remains fully supported and is the right choice when the bridge must act as a
+particular Salesforce user, or when your security policy requires certificate-based
+authentication. Note the key must be PKCS#1 -- a PEM block labelled `RSA PRIVATE KEY`. OpenSSL 3
+writes PKCS#8 by default, so generate with `openssl genrsa -traditional` or convert an existing
+key with `openssl rsa -traditional -in old.key -out new.key`.
+
+**Password auth is deprecated.** Salesforce disables the username-password flow by default on
+new orgs and is retiring it, and it requires a security token appended to the password. The
+daemon logs a warning at startup when this flow is selected. It will be removed in a future
+major version.
+
+### Choosing the flow implicitly
+
+`OAUTH_GRANT_TYPE` is optional. When it is unset the flow is inferred from the credentials
+present -- JWT bearer if `OAUTH_JWT_KEY` is set, otherwise password -- which is how the daemon
+behaved before the variable existed, so an existing deployment needs no changes.
+
+Client credentials cannot be inferred, because its credentials are a subset of the password
+flow's. Selecting it always requires setting `OAUTH_GRANT_TYPE`.
 
 ## Polling intervals
 
