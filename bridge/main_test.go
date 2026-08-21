@@ -199,7 +199,7 @@ func setMinimalBridgeEnv(t *testing.T) {
 	setEnv(t, "OAUTH_USERNAME", "test@example.invalid")
 	setEnv(t, "OAUTH_PASSWORD", "test-password")
 	setEnv(t, "OAUTH_SECRET", "test-secret")
-	for _, name := range []string{"OAUTH_JWT_KEY", "OAUTH_URI", "HTTP_TIMEOUT", "LD_BASE_URI", "LD_EVENTS_URI"} {
+	for _, name := range []string{"OAUTH_JWT_KEY", "OAUTH_URI", "HTTP_TIMEOUT", "LD_BASE_URI", "LD_EVENTS_URI", "LD_PROJECT_KEY"} {
 		unsetEnv(t, name)
 	}
 }
@@ -785,22 +785,43 @@ func TestSalesforceRequestsCarryProjectHeader(t *testing.T) {
 	}
 }
 
-// TestProjectKeyIsTrimmedAndOptional pins the env-var handling: surrounding whitespace is not
-// part of the key, and an all-whitespace value means unset rather than a key of spaces.
-func TestProjectKeyIsTrimmedAndOptional(t *testing.T) {
-	for _, testCase := range []struct {
-		name string
-		set  string
-		want string
+// TestNewBridgeResolvesProjectKey covers LD_PROJECT_KEY through newBridge rather than by
+// reading the variable back directly, so the trimming and the optionality are asserted on the
+// value the bridge actually uses.
+//
+// The distinction between unset and whitespace-only matters: both must yield an empty key,
+// because an empty key is what causes the project header to be omitted entirely, and that
+// omission is what lets an org and a bridge be upgraded in either order.
+func TestNewBridgeResolvesProjectKey(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		set   bool
+		want  string
 	}{
-		{name: "plain", set: "gps", want: "gps"},
-		{name: "padded", set: "  gps  ", want: "gps"},
-		{name: "whitespace only", set: "   ", want: ""},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Setenv("LD_PROJECT_KEY", testCase.set)
-			if got := strings.TrimSpace(os.Getenv("LD_PROJECT_KEY")); got != testCase.want {
-				t.Errorf("LD_PROJECT_KEY resolved to %q, want %q", got, testCase.want)
+		{name: "unset yields no project", set: false, want: ""},
+		{name: "empty yields no project", value: "", set: true, want: ""},
+		{name: "whitespace only yields no project", value: "   ", set: true, want: ""},
+		{name: "plain value", value: "gps", set: true, want: "gps"},
+		{name: "surrounding whitespace is trimmed", value: "  gps  ", set: true, want: "gps"},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			setMinimalBridgeEnv(t)
+			if test.set {
+				setEnv(t, "LD_PROJECT_KEY", test.value)
+			} else {
+				unsetEnv(t, "LD_PROJECT_KEY")
+			}
+
+			bridge, err := newBridge()
+			if err != nil {
+				t.Fatalf("newBridge returned unexpected error: %v", err)
+			}
+			if bridge.projectKey != test.want {
+				t.Errorf("projectKey = %q, want %q", bridge.projectKey, test.want)
 			}
 		})
 	}
