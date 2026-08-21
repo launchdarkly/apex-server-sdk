@@ -736,3 +736,72 @@ func TestEventLoopReusesConnectionsOnPollError(t *testing.T) {
 			connections, served, allowedConnections)
 	}
 }
+
+// TestSalesforceRequestsCarryProjectHeader covers both directions of the multi-project
+// contract on the bridge side: the header rides Salesforce-bound requests when a project is
+// configured, and is absent entirely when one is not.
+//
+// The absence half matters as much as the presence half. An omitted header is what makes a
+// bridge that has not opted in indistinguishable from one running an older version, which is
+// what lets an operator upgrade the org and the bridge in either order.
+func TestSalesforceRequestsCarryProjectHeader(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		projectKey string
+		want       string
+	}{
+		{name: "configured", projectKey: "gps", want: "gps"},
+		{name: "unset", projectKey: "", want: ""},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var captured string
+			var present bool
+
+			bridge := newTestBridge(t, "http://unused.invalid", "http://unused.invalid")
+			bridge.oauthCurrentToken = "test-token"
+			bridge.projectKey = testCase.projectKey
+
+			sfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				captured = r.Header.Get(PROJECT_HEADER)
+				_, present = r.Header[PROJECT_HEADER]
+				bridge.cancel()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer sfServer.Close()
+			bridge.salesforceURL = sfServer.URL + "/"
+
+			if err := bridge.eventLoop(); err != nil {
+				t.Fatalf("eventLoop returned unexpected error: %v", err)
+			}
+
+			if captured != testCase.want {
+				t.Errorf("%s = %q, want %q", PROJECT_HEADER, captured, testCase.want)
+			}
+			if testCase.projectKey == "" && present {
+				t.Errorf("%s was sent with an unset project key; it must be omitted so the "+
+					"request is indistinguishable from an older bridge's", PROJECT_HEADER)
+			}
+		})
+	}
+}
+
+// TestProjectKeyIsTrimmedAndOptional pins the env-var handling: surrounding whitespace is not
+// part of the key, and an all-whitespace value means unset rather than a key of spaces.
+func TestProjectKeyIsTrimmedAndOptional(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		set  string
+		want string
+	}{
+		{name: "plain", set: "gps", want: "gps"},
+		{name: "padded", set: "  gps  ", want: "gps"},
+		{name: "whitespace only", set: "   ", want: ""},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("LD_PROJECT_KEY", testCase.set)
+			if got := strings.TrimSpace(os.Getenv("LD_PROJECT_KEY")); got != testCase.want {
+				t.Errorf("LD_PROJECT_KEY resolved to %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}

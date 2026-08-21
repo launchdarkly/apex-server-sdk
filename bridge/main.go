@@ -62,6 +62,11 @@ const (
 	//
 	// See: sdk-specs / SCMP-server-connection-minutes-polling (section 1.1).
 	INSTANCE_ID_HEADER = "X-LaunchDarkly-Instance-Id"
+	// PROJECT_HEADER names the LaunchDarkly project on Salesforce-bound requests, so the
+	// org can scope stored flag data and queued events to one project. It is sent only
+	// when LD_PROJECT_KEY is configured, which keeps a bridge that has not opted in
+	// indistinguishable from one running an older version.
+	PROJECT_HEADER = "LD-Project-Key"
 )
 
 type Bridge struct {
@@ -81,6 +86,10 @@ type Bridge struct {
 	// LaunchDarkly-bound request (see INSTANCE_ID_HEADER) so the platform can estimate
 	// server-connection-minutes for polling clients.
 	instanceID string
+	// projectKey scopes this bridge to one LaunchDarkly project within the Salesforce org.
+	// Empty means unscoped, matching records that carry no project. It must agree with the
+	// project key configured on the Apex side or evaluation finds no flag data.
+	projectKey string
 	// eventPollInterval is how long eventLoop waits between drains of EventData__c,
 	// and flagPollInterval is how long featureLoop waits between flag polls. Both
 	// default to DEFAULT_POLL_INTERVAL and are configurable per loop.
@@ -212,6 +221,19 @@ func newBridge() (*Bridge, error) {
 
 	bridge.client = http.Client{
 		Timeout: httpTimeoutDuration,
+	}
+
+	// Optional. Unset means this bridge owns the records that carry no project, which is
+	// both the pre-multi-project behavior and the state an existing deployment upgrades
+	// into without changing anything. Logged either way, because a mismatch against the
+	// Apex-side project key produces no error -- evaluation simply finds no flag data and
+	// every variation returns its fallback.
+	bridge.projectKey = strings.TrimSpace(os.Getenv("LD_PROJECT_KEY"))
+	if bridge.projectKey == "" {
+		log.Print("LD_PROJECT_KEY is not set, scoping to records with no project")
+	} else {
+		log.Printf("LD_PROJECT_KEY is %q; the Apex client must be configured with the same value",
+			bridge.projectKey)
 	}
 
 	context, cancel := context.WithCancel(context.Background())
@@ -346,6 +368,14 @@ func (bridge *Bridge) requestWithOauth(request *http.Request) (*http.Response, e
 	bridge.lock.Unlock()
 
 	request.Header.Set("Authorization", "Bearer "+token)
+
+	// Every Salesforce-bound request goes through this function, so the project is stamped
+	// here rather than at each call site. When unset the header is omitted entirely, so the
+	// request is indistinguishable from one sent by a bridge predating multi-project
+	// support -- which is what makes either upgrade order safe.
+	if bridge.projectKey != "" {
+		request.Header.Set(PROJECT_HEADER, bridge.projectKey)
+	}
 
 	response, err := bridge.client.Do(request)
 	if err != nil {
