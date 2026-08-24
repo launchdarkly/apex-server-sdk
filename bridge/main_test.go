@@ -3,6 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"io/ioutil"
 	"log"
 	"net"
@@ -923,4 +928,105 @@ func TestAuthorizeSalesforcePostsTheRightForm(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTokenEndpointFrom(t *testing.T) {
+	tests := []struct {
+		name          string
+		salesforceURL string
+		want          string
+		wantErr       bool
+	}{
+		{
+			name:          "apex rest url",
+			salesforceURL: "https://example-dev-ed.develop.my.salesforce.com/services/apexrest/",
+			want:          "https://example-dev-ed.develop.my.salesforce.com/services/oauth2/token",
+		},
+		{
+			name:          "no trailing slash",
+			salesforceURL: "https://example.my.salesforce.com/services/apexrest",
+			want:          "https://example.my.salesforce.com/services/oauth2/token",
+		},
+		{name: "empty is an error", salesforceURL: "", wantErr: true},
+		{name: "no scheme is an error", salesforceURL: "example.my.salesforce.com/services/apexrest/", wantErr: true},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			got, err := tokenEndpointFrom(test.salesforceURL)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error for %q, got %q", test.salesforceURL, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("tokenEndpointFrom returned unexpected error: %v", err)
+			}
+			if got != test.want {
+				t.Errorf("endpoint = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// TestClientCredentialsDerivesItsTokenEndpoint covers the failure this defends against: the
+// shared login host rejects the client credentials grant with "request not supported on this
+// domain", so leaving OAUTH_URI at its default would break every deployment using this grant.
+// Verified against the live org before the derivation existed.
+func TestClientCredentialsDerivesItsTokenEndpoint(t *testing.T) {
+	setMinimalBridgeEnv(t)
+	setEnv(t, "OAUTH_GRANT_TYPE", GRANT_CLIENT_CREDENTIALS)
+	unsetEnv(t, "OAUTH_URI")
+
+	bridge, err := newBridge()
+	if err != nil {
+		t.Fatalf("newBridge returned unexpected error: %v", err)
+	}
+
+	want := "https://example.invalid/services/oauth2/token"
+	if got := bridge.oauthURI.String(); got != want {
+		t.Errorf("token endpoint = %q, want %q", got, want)
+	}
+}
+
+// The other grants are accepted on the shared login host, so their default must not change.
+func TestOtherGrantsKeepTheDefaultTokenEndpoint(t *testing.T) {
+	for _, grant := range []string{GRANT_JWT_BEARER, GRANT_PASSWORD} {
+		grant := grant
+		t.Run(grant, func(t *testing.T) {
+			setMinimalBridgeEnv(t)
+			setEnv(t, "OAUTH_GRANT_TYPE", grant)
+			unsetEnv(t, "OAUTH_URI")
+			if grant == GRANT_JWT_BEARER {
+				setEnv(t, "OAUTH_JWT_KEY", testJWTKeyBase64(t))
+			}
+
+			bridge, err := newBridge()
+			if err != nil {
+				t.Fatalf("newBridge returned unexpected error: %v", err)
+			}
+			if got := bridge.oauthURI.String(); got != OAUTH_URI {
+				t.Errorf("token endpoint = %q, want the default %q", got, OAUTH_URI)
+			}
+		})
+	}
+}
+
+// testJWTKeyBase64 produces an OAUTH_JWT_KEY the bridge will accept: a PKCS#1 key in a PEM
+// block labelled "RSA PRIVATE KEY", base64 encoded. A short key keeps the test fast; nothing
+// here signs anything that Salesforce verifies.
+func testJWTKeyBase64(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("failed generating a test RSA key: %v", err)
+	}
+	encoded := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+
+	return base64.StdEncoding.EncodeToString(encoded)
 }

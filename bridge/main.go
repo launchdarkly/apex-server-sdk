@@ -123,6 +123,22 @@ func parseDurationFromEnv(name string, fallback time.Duration) time.Duration {
 	return parsed
 }
 
+// tokenEndpointFrom builds an org's token endpoint from its Apex REST URL.
+//
+// The client credentials grant is only accepted on the org's own domain; the shared
+// login host answers "invalid_grant: request not supported on this domain". Since
+// SALESFORCE_URL already names the right host, the endpoint is derived from it rather
+// than being made the operator's problem to discover.
+func tokenEndpointFrom(salesforceURL string) (string, error) {
+	parsed, err := url.Parse(salesforceURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("cannot derive a token endpoint from SALESFORCE_URL '" +
+			salesforceURL + "'; set OAUTH_URI explicitly")
+	}
+
+	return parsed.Scheme + "://" + parsed.Host + "/services/oauth2/token", nil
+}
+
 // resolveGrantType decides which OAuth flow to use.
 //
 // An explicit OAUTH_GRANT_TYPE always wins. When it is unset the flow is inferred from the
@@ -180,9 +196,28 @@ func newBridge() (*Bridge, error) {
 		return nil, errors.New("OAUTH_ID not set")
 	}
 
+	oauthJWTKey := os.Getenv("OAUTH_JWT_KEY")
+
+	grantType, err := resolveGrantType(oauthJWTKey)
+	if err != nil {
+		return nil, err
+	}
+	bridge.oauthGrantType = grantType
+
+	// The token endpoint depends on the grant, so it is resolved after it.
 	oauthURIString := os.Getenv("OAUTH_URI")
 	if oauthURIString == "" {
-		oauthURIString = OAUTH_URI
+		if grantType == GRANT_CLIENT_CREDENTIALS {
+			derived, err := tokenEndpointFrom(bridge.salesforceURL)
+			if err != nil {
+				return nil, err
+			}
+			oauthURIString = derived
+			log.Printf("OAUTH_URI is not set; using %s derived from SALESFORCE_URL, because the "+
+				"client credentials grant is not accepted on the shared login host", derived)
+		} else {
+			oauthURIString = OAUTH_URI
+		}
 	}
 
 	oauthURI, err := url.Parse(oauthURIString)
@@ -191,13 +226,16 @@ func newBridge() (*Bridge, error) {
 	}
 	bridge.oauthURI = *oauthURI
 
-	oauthJWTKey := os.Getenv("OAUTH_JWT_KEY")
-
-	grantType, err := resolveGrantType(oauthJWTKey)
-	if err != nil {
-		return nil, err
+	// A configured login host cannot work for this grant, and Salesforce's rejection --
+	// "request not supported on this domain" -- does not point at the cause.
+	if grantType == GRANT_CLIENT_CREDENTIALS {
+		host := strings.ToLower(bridge.oauthURI.Host)
+		if host == "login.salesforce.com" || host == "test.salesforce.com" {
+			log.Printf("OAUTH_URI points at %s, which rejects the client credentials grant; "+
+				"use the org's own domain, such as %s", host,
+				"https://MyDomainName.my.salesforce.com/services/oauth2/token")
+		}
 	}
-	bridge.oauthGrantType = grantType
 	log.Printf("authenticating to Salesforce with the %s grant", grantType)
 	if grantType == GRANT_PASSWORD {
 		log.Print("the password grant is deprecated: Salesforce disables it by default on new " +
