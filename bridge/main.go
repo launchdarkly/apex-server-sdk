@@ -312,8 +312,8 @@ func newBridge() (*Bridge, error) {
 	}
 
 	if bridge.eventPollInterval < EVENT_POLL_INTERVAL_WARN_THRESHOLD {
-		log.Printf("event flush interval is %s, polling may trigger organization wide API limits",
-			bridge.eventPollInterval)
+		log.Printf("%s duration (%s) is below %s, polling may trigger organization wide API limits",
+			"EVENT_POLL_INTERVAL", bridge.eventPollInterval, EVENT_POLL_INTERVAL_WARN_THRESHOLD)
 	}
 
 	bridge.flagPollInterval = parseDurationFromEnv("FLAG_POLL_INTERVAL", DEFAULT_POLL_INTERVAL)
