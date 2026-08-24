@@ -45,6 +45,9 @@ export OAUTH_PASSWORD='Your Salesforce password + security token'
 export OAUTH_URI='YOUR OAUTH URI'
 # if not set, defaults to: 'https://login.salesforce.com/services/oauth2/token'
 # if authenticating against sandbox, use: 'https://test.salesforce.com/services/oauth2/token'
+# the client credentials grant is not accepted on either of those shared hosts. When that
+# grant is selected and this is unset, the endpoint is derived from SALESFORCE_URL instead,
+# and the derived value is logged at startup
 export HTTP_TIMEOUT='Your timeout'
 # such as: '1500ms'
 # see https://golang.org/pkg/time/#ParseDuration for formatting
@@ -81,7 +84,21 @@ corresponding failure mode with client credentials.
 
 Enable the flow on the app in Salesforce before configuring it here. On an External Client App
 that is the **Enable Client Credentials Flow** setting, and it requires a run-as user to be
-designated.
+designated -- the flow carries no user context, so Salesforce needs to be told which identity
+to act as. Note the setting appears in two places, the app's OAuth settings and its policies,
+and both must be enabled.
+
+This grant is **not accepted on `login.salesforce.com` or `test.salesforce.com`**. Those hosts
+answer `invalid_grant: request not supported on this domain`, which names neither the grant nor
+the setting at fault. Point `OAUTH_URI` at the org's own domain instead:
+
+```bash
+export OAUTH_URI='https://MyDomainName.my.salesforce.com/services/oauth2/token'
+```
+
+Or leave `OAUTH_URI` unset and the bridge derives that endpoint from `SALESFORCE_URL`, logging
+what it chose. Configuring a login host explicitly logs a warning, since the derivation cannot
+override an explicit choice.
 
 **JWT bearer** remains fully supported and is the right choice when the bridge must act as a
 particular Salesforce user, or when your security policy requires certificate-based
