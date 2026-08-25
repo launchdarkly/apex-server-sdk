@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"io/ioutil"
 	"log"
@@ -16,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -824,18 +828,35 @@ func TestClientCredentialsNeedsNoUsername(t *testing.T) {
 	}
 }
 
+// TestGrantValidationIsPerGrant covers what each flow demands and what it tolerates being
+// absent. Both halves matter: a missing credential must stop startup rather than surface
+// later as an opaque Salesforce rejection, and a credential another flow needs must not be
+// required here.
 func TestGrantValidationIsPerGrant(t *testing.T) {
 	tests := []struct {
-		name    string
-		grant   string
-		unset   []string
-		wantErr bool
+		name      string
+		grant     string
+		setJWTKey bool
+		unset     []string
+		wantErr   bool
 	}{
 		{name: "client credentials without a secret", grant: GRANT_CLIENT_CREDENTIALS, unset: []string{"OAUTH_SECRET"}, wantErr: true},
+		{name: "client credentials without an id", grant: GRANT_CLIENT_CREDENTIALS, unset: []string{"OAUTH_ID"}, wantErr: true},
 		{name: "client credentials without a password is fine", grant: GRANT_CLIENT_CREDENTIALS, unset: []string{"OAUTH_PASSWORD"}},
+		{name: "client credentials without a username is fine", grant: GRANT_CLIENT_CREDENTIALS, unset: []string{"OAUTH_USERNAME"}},
+		{name: "client credentials without a jwt key is fine", grant: GRANT_CLIENT_CREDENTIALS, unset: []string{"OAUTH_JWT_KEY"}},
+
 		{name: "jwt bearer without a key", grant: GRANT_JWT_BEARER, unset: []string{"OAUTH_JWT_KEY"}, wantErr: true},
+		{name: "jwt bearer without a username", grant: GRANT_JWT_BEARER, setJWTKey: true, unset: []string{"OAUTH_USERNAME"}, wantErr: true},
+		{name: "jwt bearer without an id", grant: GRANT_JWT_BEARER, setJWTKey: true, unset: []string{"OAUTH_ID"}, wantErr: true},
+		{name: "jwt bearer without a secret is fine", grant: GRANT_JWT_BEARER, setJWTKey: true, unset: []string{"OAUTH_SECRET"}},
+		{name: "jwt bearer without a password is fine", grant: GRANT_JWT_BEARER, setJWTKey: true, unset: []string{"OAUTH_PASSWORD"}},
+
 		{name: "password without a username", grant: GRANT_PASSWORD, unset: []string{"OAUTH_USERNAME"}, wantErr: true},
 		{name: "password without a password", grant: GRANT_PASSWORD, unset: []string{"OAUTH_PASSWORD"}, wantErr: true},
+		{name: "password without a secret", grant: GRANT_PASSWORD, unset: []string{"OAUTH_SECRET"}, wantErr: true},
+		{name: "password without an id", grant: GRANT_PASSWORD, unset: []string{"OAUTH_ID"}, wantErr: true},
+		{name: "password without a jwt key is fine", grant: GRANT_PASSWORD, unset: []string{"OAUTH_JWT_KEY"}},
 	}
 
 	for _, test := range tests {
@@ -843,6 +864,9 @@ func TestGrantValidationIsPerGrant(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			setMinimalBridgeEnv(t)
 			setEnv(t, "OAUTH_GRANT_TYPE", test.grant)
+			if test.setJWTKey {
+				setEnv(t, "OAUTH_JWT_KEY", testJWTKeyBase64(t))
+			}
 			for _, name := range test.unset {
 				unsetEnv(t, name)
 			}
@@ -858,6 +882,52 @@ func TestGrantValidationIsPerGrant(t *testing.T) {
 	}
 }
 
+// TestGrantsReadOnlyTheirOwnCredentials asserts a flow ignores the variables it has no use
+// for, even when the environment supplies them. A leftover OAUTH_PASSWORD from a previous
+// password-flow deployment must not travel anywhere once client credentials is selected.
+func TestGrantsReadOnlyTheirOwnCredentials(t *testing.T) {
+	tests := []struct {
+		grant        string
+		wantUsername string
+		wantPassword string
+		wantSecret   string
+		wantJWTKey   bool
+	}{
+		{grant: GRANT_CLIENT_CREDENTIALS, wantSecret: "test-secret"},
+		{grant: GRANT_JWT_BEARER, wantUsername: "test@example.invalid", wantJWTKey: true},
+		{grant: GRANT_PASSWORD, wantUsername: "test@example.invalid", wantPassword: "test-password", wantSecret: "test-secret"},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.grant, func(t *testing.T) {
+			// Every credential the bridge understands is present, so anything the
+			// resolved bridge leaves empty was deliberately not read.
+			setMinimalBridgeEnv(t)
+			setEnv(t, "OAUTH_GRANT_TYPE", test.grant)
+			setEnv(t, "OAUTH_JWT_KEY", testJWTKeyBase64(t))
+
+			bridge, err := newBridge()
+			if err != nil {
+				t.Fatalf("newBridge returned unexpected error: %v", err)
+			}
+
+			if bridge.oauthUsername != test.wantUsername {
+				t.Errorf("username = %q, want %q", bridge.oauthUsername, test.wantUsername)
+			}
+			if bridge.oauthPassword != test.wantPassword {
+				t.Errorf("password = %q, want %q", bridge.oauthPassword, test.wantPassword)
+			}
+			if bridge.oauthSecret != test.wantSecret {
+				t.Errorf("secret = %q, want %q", bridge.oauthSecret, test.wantSecret)
+			}
+			if gotKey := bridge.oauthJWTKey != nil; gotKey != test.wantJWTKey {
+				t.Errorf("jwt key loaded = %v, want %v", gotKey, test.wantJWTKey)
+			}
+		})
+	}
+}
+
 // TestAuthorizeSalesforcePostsTheRightForm asserts the wire contract for each grant, since
 // that is what Salesforce actually validates. The client credentials case additionally
 // asserts the absence of username and password: sending a user credential on a grant that
@@ -866,6 +936,7 @@ func TestAuthorizeSalesforcePostsTheRightForm(t *testing.T) {
 	tests := []struct {
 		name        string
 		grant       string
+		jwt         bool
 		wantGrant   string
 		wantPresent []string
 		wantAbsent  []string
@@ -876,6 +947,16 @@ func TestAuthorizeSalesforcePostsTheRightForm(t *testing.T) {
 			wantGrant:   "client_credentials",
 			wantPresent: []string{"client_id", "client_secret"},
 			wantAbsent:  []string{"username", "password", "assertion"},
+		},
+		{
+			// The assertion carries the identity, so the JWT bearer flow sends no client
+			// secret and no user credential alongside it.
+			name:        "jwt bearer",
+			grant:       GRANT_JWT_BEARER,
+			jwt:         true,
+			wantGrant:   "urn:ietf:params:oauth:grant-type:jwt-bearer",
+			wantPresent: []string{"assertion"},
+			wantAbsent:  []string{"client_id", "client_secret", "username", "password"},
 		},
 		{
 			name:        "password",
@@ -901,6 +982,9 @@ func TestAuthorizeSalesforcePostsTheRightForm(t *testing.T) {
 			setMinimalBridgeEnv(t)
 			setEnv(t, "OAUTH_GRANT_TYPE", test.grant)
 			setEnv(t, "OAUTH_URI", tokenServer.URL)
+			if test.jwt {
+				setEnv(t, "OAUTH_JWT_KEY", testJWTKeyBase64(t))
+			}
 
 			bridge, err := newBridge()
 			if err != nil {
@@ -923,6 +1007,12 @@ func TestAuthorizeSalesforcePostsTheRightForm(t *testing.T) {
 				if _, ok := posted[name]; ok {
 					t.Errorf("%s was sent on the %s grant and should not have been", name, test.grant)
 				}
+			}
+			// Salesforce rejects an assertion it cannot verify, so the signature on the
+			// value that actually goes over the wire is checked here, not only in
+			// makeJWT's own test.
+			if test.jwt {
+				verifyAssertionSignature(t, bridge, posted.Get("assertion"))
 			}
 			if bridge.oauthCurrentToken != "test-token" {
 				t.Errorf("token = %q, want %q", bridge.oauthCurrentToken, "test-token")
@@ -1090,5 +1180,656 @@ func TestEventLoopStreamsLargeErrorBodies(t *testing.T) {
 		t.Errorf("allocated %d bytes draining %d error responses of %d bytes each (ceiling %d); "+
 			"drainAndClose is buffering bodies instead of streaming them",
 			allocated, served, bodySize, maxTotalAlloc)
+	}
+}
+
+// allGrants is every flow newBridge resolves to. Tests whose expectation holds for all
+// three range over it, so adding a flow without considering them fails to compile.
+var allGrants = []string{GRANT_CLIENT_CREDENTIALS, GRANT_JWT_BEARER, GRANT_PASSWORD}
+
+// bridgeForGrant builds a bridge configured for one flow, with its token endpoint pointed
+// at tokenURI. Each flow needs a different set of variables, so the JWT key is supplied
+// only where it is required.
+func bridgeForGrant(t *testing.T, grant, tokenURI string) *Bridge {
+	t.Helper()
+	setMinimalBridgeEnv(t)
+	setEnv(t, "OAUTH_GRANT_TYPE", grant)
+	setEnv(t, "OAUTH_URI", tokenURI)
+	if grant == GRANT_JWT_BEARER {
+		setEnv(t, "OAUTH_JWT_KEY", testJWTKeyBase64(t))
+	}
+
+	bridge, err := newBridge()
+	if err != nil {
+		t.Fatalf("newBridge returned unexpected error for the %s grant: %v", grant, err)
+	}
+
+	return bridge
+}
+
+// decodeJWTSegment decodes one dot-separated segment of an assertion. Padding is restored
+// when it is absent, so the helper reads both the padded base64url the bridge writes today
+// and the unpadded form a JWT is normally encoded with. That keeps these tests about the
+// claims rather than about the encoding.
+func decodeJWTSegment(t *testing.T, segment string) []byte {
+	t.Helper()
+	if remainder := len(segment) % 4; remainder != 0 {
+		segment += strings.Repeat("=", 4-remainder)
+	}
+	decoded, err := base64.URLEncoding.DecodeString(segment)
+	if err != nil {
+		t.Fatalf("failed decoding JWT segment %q: %v", segment, err)
+	}
+
+	return decoded
+}
+
+// verifyAssertionSignature checks that an assertion was signed by the key the bridge
+// loaded. The signed input is the first two segments verbatim, so this holds whatever
+// base64 variant produced them.
+func verifyAssertionSignature(t *testing.T, bridge *Bridge, assertion string) {
+	t.Helper()
+	segments := strings.Split(assertion, ".")
+	if len(segments) != 3 {
+		t.Fatalf("assertion has %d segments, want 3", len(segments))
+	}
+
+	digest := sha256.Sum256([]byte(segments[0] + "." + segments[1]))
+	signature := decodeJWTSegment(t, segments[2])
+	if err := rsa.VerifyPKCS1v15(&bridge.oauthJWTKey.PublicKey, crypto.SHA256, digest[:], signature); err != nil {
+		t.Errorf("the assertion does not verify against the configured key: %v", err)
+	}
+}
+
+// TestMakeJWTSignsTheExpectedAssertion covers the only flow that constructs a credential
+// rather than forwarding one. Salesforce validates every field independently and answers a
+// wrong one with the same opaque invalid_grant, so each is asserted here.
+func TestMakeJWTSignsTheExpectedAssertion(t *testing.T) {
+	setMinimalBridgeEnv(t)
+	setEnv(t, "OAUTH_GRANT_TYPE", GRANT_JWT_BEARER)
+	setEnv(t, "OAUTH_JWT_KEY", testJWTKeyBase64(t))
+	setEnv(t, "OAUTH_ID", "jwt-consumer-key")
+	setEnv(t, "OAUTH_USERNAME", "jwt-user@example.invalid")
+	// The audience is the token endpoint's host, so a configured endpoint must reach it.
+	setEnv(t, "OAUTH_URI", "https://example-dev-ed.develop.my.salesforce.com/services/oauth2/token")
+
+	bridge, err := newBridge()
+	if err != nil {
+		t.Fatalf("newBridge returned unexpected error: %v", err)
+	}
+
+	issued := time.Now().Unix()
+	assertion, err := bridge.makeJWT()
+	if err != nil {
+		t.Fatalf("makeJWT returned unexpected error: %v", err)
+	}
+	signedBefore := time.Now().Unix()
+
+	segments := strings.Split(*assertion, ".")
+	if len(segments) != 3 {
+		t.Fatalf("assertion has %d segments, want 3: %q", len(segments), *assertion)
+	}
+
+	// Salesforce accepts RS256 only, and the header is what selects it.
+	if header := string(decodeJWTSegment(t, segments[0])); header != `{"alg":"RS256"}` {
+		t.Errorf("header = %s, want {\"alg\":\"RS256\"}", header)
+	}
+
+	var claim JWTClaim
+	if err := json.Unmarshal(decodeJWTSegment(t, segments[1]), &claim); err != nil {
+		t.Fatalf("failed decoding the claim set: %v", err)
+	}
+	if claim.ISS != "jwt-consumer-key" {
+		t.Errorf("iss = %q, want the consumer key %q", claim.ISS, "jwt-consumer-key")
+	}
+	if claim.Sub != "jwt-user@example.invalid" {
+		t.Errorf("sub = %q, want the username %q", claim.Sub, "jwt-user@example.invalid")
+	}
+	if claim.Aud != "example-dev-ed.develop.my.salesforce.com" {
+		t.Errorf("aud = %q, want the token endpoint host", claim.Aud)
+	}
+
+	// The assertion expires two minutes out. Salesforce applies no tolerance, which is
+	// why the bridge is sensitive to host clock skew on this flow.
+	expiry, err := strconv.ParseInt(claim.Exp, 10, 64)
+	if err != nil {
+		t.Fatalf("exp %q is not a unix timestamp: %v", claim.Exp, err)
+	}
+	if expiry < issued+120 || expiry > signedBefore+120 {
+		t.Errorf("exp = %d, want a value 120s after a signing time in [%d, %d]", expiry, issued, signedBefore)
+	}
+
+	verifyAssertionSignature(t, bridge, *assertion)
+}
+
+// TestMakeJWTSignsDistinctAssertions guards against a cached assertion. Each attempt must
+// carry its own expiry, or a bridge that ran longer than two minutes would keep replaying
+// an expired credential.
+func TestMakeJWTSignsDistinctAssertions(t *testing.T) {
+	setMinimalBridgeEnv(t)
+	setEnv(t, "OAUTH_GRANT_TYPE", GRANT_JWT_BEARER)
+	setEnv(t, "OAUTH_JWT_KEY", testJWTKeyBase64(t))
+
+	bridge, err := newBridge()
+	if err != nil {
+		t.Fatalf("newBridge returned unexpected error: %v", err)
+	}
+
+	first, err := bridge.makeJWT()
+	if err != nil {
+		t.Fatalf("makeJWT returned unexpected error: %v", err)
+	}
+	// A second past the first, so the expiry in the claim set differs.
+	time.Sleep(1100 * time.Millisecond)
+	second, err := bridge.makeJWT()
+	if err != nil {
+		t.Fatalf("makeJWT returned unexpected error: %v", err)
+	}
+
+	if *first == *second {
+		t.Error("two assertions signed a second apart are identical, so the expiry is not being refreshed")
+	}
+	verifyAssertionSignature(t, bridge, *second)
+}
+
+// TestJWTKeyValidation covers every way OAUTH_JWT_KEY is rejected. The PKCS#8 case is the
+// one operators hit: OpenSSL 3 writes that format by default, so a key generated with plain
+// `openssl genrsa` cannot be loaded and the message has to say which format is wanted.
+func TestJWTKeyValidation(t *testing.T) {
+	validKey := testJWTKeyBase64(t)
+
+	pemBase64 := func(blockType string, contents []byte) string {
+		return base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{
+			Type:  blockType,
+			Bytes: contents,
+		}))
+	}
+
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("failed generating a test RSA key: %v", err)
+	}
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("failed marshalling a PKCS#8 key: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		key         string
+		wantMessage string
+	}{
+		{name: "a pkcs1 key in an rsa private key block is accepted", key: validKey},
+		// `base64` wraps at 76 columns unless told otherwise. The README suggests -w 0,
+		// but a wrapped key still loads, so an operator who omits it is not stuck.
+		{name: "line wrapped base64 is accepted", key: wrapBase64(validKey, 76)},
+
+		{name: "unset", key: "", wantMessage: "OAUTH_JWT_KEY not set"},
+		{name: "not base64 at all", key: "this is not base64 !!", wantMessage: "base64"},
+		{name: "base64 of something that is not pem", key: base64.StdEncoding.EncodeToString([]byte("just some text")), wantMessage: "PEM-encoded block"},
+		{name: "pkcs8 from openssl 3", key: pemBase64("PRIVATE KEY", pkcs8), wantMessage: "RSA PRIVATE KEY"},
+		{name: "an ec key block", key: pemBase64("EC PRIVATE KEY", []byte("irrelevant")), wantMessage: "RSA PRIVATE KEY"},
+		{name: "a public key", key: pemBase64("PUBLIC KEY", x509.MarshalPKCS1PublicKey(&key.PublicKey)), wantMessage: "RSA PRIVATE KEY"},
+		// Right label, contents that are not a PKCS#1 key. This is what a truncated or
+		// re-encoded key file looks like.
+		{name: "the right label around the wrong bytes", key: pemBase64("RSA PRIVATE KEY", []byte("not a der encoded key")), wantMessage: "PKCS1"},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			setMinimalBridgeEnv(t)
+			setEnv(t, "OAUTH_GRANT_TYPE", GRANT_JWT_BEARER)
+			setEnv(t, "OAUTH_JWT_KEY", test.key)
+
+			bridge, err := newBridge()
+			if test.wantMessage == "" {
+				if err != nil {
+					t.Fatalf("newBridge rejected a valid key: %v", err)
+				}
+				if bridge.oauthJWTKey == nil {
+					t.Error("newBridge succeeded but loaded no key")
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("newBridge accepted an unusable key, wanting an error naming %q", test.wantMessage)
+			}
+			if !strings.Contains(err.Error(), test.wantMessage) {
+				t.Errorf("error = %q, want it to name %q so the operator knows what to fix", err, test.wantMessage)
+			}
+		})
+	}
+}
+
+// wrapBase64 inserts a newline every width characters, reproducing what the base64 command
+// line tool emits without -w 0.
+func wrapBase64(encoded string, width int) string {
+	var wrapped strings.Builder
+	for len(encoded) > width {
+		wrapped.WriteString(encoded[:width])
+		wrapped.WriteString("\n")
+		encoded = encoded[width:]
+	}
+	wrapped.WriteString(encoded)
+
+	return wrapped.String()
+}
+
+// TestNewBridgeInfersTheGrant covers the compatibility promise: a deployment that predates
+// OAUTH_GRANT_TYPE keeps the flow it already had. TestResolveGrantType covers the same
+// decision in isolation; this asserts newBridge acts on it, key and all.
+func TestNewBridgeInfersTheGrant(t *testing.T) {
+	t.Run("a jwt key selects jwt bearer", func(t *testing.T) {
+		setMinimalBridgeEnv(t)
+		setEnv(t, "OAUTH_JWT_KEY", testJWTKeyBase64(t))
+		unsetEnv(t, "OAUTH_GRANT_TYPE")
+		// The flow needs neither, so their absence must not stop startup.
+		unsetEnv(t, "OAUTH_PASSWORD")
+		unsetEnv(t, "OAUTH_SECRET")
+
+		bridge, err := newBridge()
+		if err != nil {
+			t.Fatalf("newBridge returned unexpected error: %v", err)
+		}
+		if bridge.oauthGrantType != GRANT_JWT_BEARER {
+			t.Errorf("grant = %q, want %q", bridge.oauthGrantType, GRANT_JWT_BEARER)
+		}
+		if bridge.oauthJWTKey == nil {
+			t.Error("the inferred jwt bearer flow loaded no key")
+		}
+	})
+
+	t.Run("no jwt key selects password", func(t *testing.T) {
+		setMinimalBridgeEnv(t)
+		unsetEnv(t, "OAUTH_GRANT_TYPE")
+
+		bridge, err := newBridge()
+		if err != nil {
+			t.Fatalf("newBridge returned unexpected error: %v", err)
+		}
+		if bridge.oauthGrantType != GRANT_PASSWORD {
+			t.Errorf("grant = %q, want %q", bridge.oauthGrantType, GRANT_PASSWORD)
+		}
+		if bridge.oauthJWTKey != nil {
+			t.Error("the password flow loaded a jwt key")
+		}
+	})
+
+	// A typo must stop startup. Falling through to an inferred flow would authenticate a
+	// different way than the operator asked for.
+	t.Run("an unrecognized grant stops startup", func(t *testing.T) {
+		setMinimalBridgeEnv(t)
+		setEnv(t, "OAUTH_GRANT_TYPE", "client_credentials")
+
+		if _, err := newBridge(); err == nil {
+			t.Fatal("newBridge accepted an unrecognized OAUTH_GRANT_TYPE")
+		}
+	})
+}
+
+// TestStartupLogsTheResolvedGrant pins the startup log line, which is the only way an
+// operator can confirm which flow is in effect once inference is involved.
+func TestStartupLogsTheResolvedGrant(t *testing.T) {
+	for _, grant := range allGrants {
+		grant := grant
+		t.Run(grant, func(t *testing.T) {
+			logged := captureLog(t)
+			bridgeForGrant(t, grant, "https://example.my.salesforce.com/services/oauth2/token")
+
+			want := "authenticating to Salesforce with the " + grant + " grant"
+			if !strings.Contains(logged.String(), want) {
+				t.Errorf("startup log does not contain %q\nlog:\n%s", want, logged.String())
+			}
+
+			// Only the password flow is deprecated, so only it earns the notice.
+			deprecated := strings.Contains(logged.String(), "the password grant is deprecated")
+			if deprecated != (grant == GRANT_PASSWORD) {
+				t.Errorf("deprecation warning present = %v for the %s grant\nlog:\n%s",
+					deprecated, grant, logged.String())
+			}
+		})
+	}
+}
+
+// TestClientCredentialsWarnsAboutSharedLoginHosts covers the advisory for a configuration
+// that cannot work. Salesforce answers a client credentials request on a shared login host
+// with "request not supported on this domain", which names neither the grant nor the host,
+// so the bridge says so at startup instead. The endpoint is still used as configured: an
+// explicit OAUTH_URI is not overridden.
+func TestClientCredentialsWarnsAboutSharedLoginHosts(t *testing.T) {
+	tests := []struct {
+		name        string
+		grant       string
+		oauthURI    string
+		wantWarning bool
+	}{
+		{name: "production login host", grant: GRANT_CLIENT_CREDENTIALS, oauthURI: "https://login.salesforce.com/services/oauth2/token", wantWarning: true},
+		{name: "sandbox login host", grant: GRANT_CLIENT_CREDENTIALS, oauthURI: "https://test.salesforce.com/services/oauth2/token", wantWarning: true},
+		// Host comparison is case insensitive, so odd casing cannot slip past the check.
+		{name: "host casing does not matter", grant: GRANT_CLIENT_CREDENTIALS, oauthURI: "https://LOGIN.Salesforce.COM/services/oauth2/token", wantWarning: true},
+		{name: "the org domain is quiet", grant: GRANT_CLIENT_CREDENTIALS, oauthURI: "https://example.my.salesforce.com/services/oauth2/token", wantWarning: false},
+		// The other flows are accepted on those hosts, so warning about them would be noise.
+		{name: "jwt bearer on a login host is quiet", grant: GRANT_JWT_BEARER, oauthURI: "https://login.salesforce.com/services/oauth2/token", wantWarning: false},
+		{name: "password on a login host is quiet", grant: GRANT_PASSWORD, oauthURI: "https://login.salesforce.com/services/oauth2/token", wantWarning: false},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			logged := captureLog(t)
+			bridge := bridgeForGrant(t, test.grant, test.oauthURI)
+
+			warned := strings.Contains(logged.String(), "rejects the client credentials grant")
+			if warned != test.wantWarning {
+				t.Errorf("warned = %v, want %v\nlog:\n%s", warned, test.wantWarning, logged.String())
+			}
+			if got := bridge.oauthURI.String(); got != test.oauthURI {
+				t.Errorf("token endpoint = %q, want the configured %q", got, test.oauthURI)
+			}
+		})
+	}
+}
+
+// TestClientCredentialsLogsTheDerivedEndpoint covers the other half of the derivation
+// TestClientCredentialsDerivesItsTokenEndpoint checks. The bridge chooses an endpoint the
+// operator never configured, so it has to report which one.
+func TestClientCredentialsLogsTheDerivedEndpoint(t *testing.T) {
+	setMinimalBridgeEnv(t)
+	setEnv(t, "OAUTH_GRANT_TYPE", GRANT_CLIENT_CREDENTIALS)
+	unsetEnv(t, "OAUTH_URI")
+	logged := captureLog(t)
+
+	bridge, err := newBridge()
+	if err != nil {
+		t.Fatalf("newBridge returned unexpected error: %v", err)
+	}
+
+	if !strings.Contains(logged.String(), bridge.oauthURI.String()) {
+		t.Errorf("startup log does not name the derived endpoint %q\nlog:\n%s",
+			bridge.oauthURI.String(), logged.String())
+	}
+}
+
+// TestClientCredentialsRefusesAnUnusableSalesforceURL covers the failure path of the
+// derivation. With no OAUTH_URI to fall back on there is no endpoint to try, so startup has
+// to stop and say which variable to set.
+func TestClientCredentialsRefusesAnUnusableSalesforceURL(t *testing.T) {
+	setMinimalBridgeEnv(t)
+	setEnv(t, "OAUTH_GRANT_TYPE", GRANT_CLIENT_CREDENTIALS)
+	setEnv(t, "SALESFORCE_URL", "example.my.salesforce.com/services/apexrest/")
+	unsetEnv(t, "OAUTH_URI")
+
+	_, err := newBridge()
+	if err == nil {
+		t.Fatal("newBridge accepted a SALESFORCE_URL it cannot derive an endpoint from")
+	}
+	if !strings.Contains(err.Error(), "OAUTH_URI") {
+		t.Errorf("error = %q, want it to name OAUTH_URI as the way out", err)
+	}
+}
+
+// TestAuthorizeSalesforceHandlesTokenResponses covers what the bridge does with the token
+// endpoint's answer. The handling is shared by every flow, so it is asserted for all three:
+// a rejected credential is permanent and stops the daemon, while anything that might pass
+// on a retry is transient and the loops carry on. Both classifications also have to leave a
+// token already in hand alone, so a transient failure does not deauthenticate a running
+// bridge.
+func TestAuthorizeSalesforceHandlesTokenResponses(t *testing.T) {
+	const existingToken = "token-from-an-earlier-authorization"
+
+	tests := []struct {
+		name          string
+		status        int
+		body          string
+		wantErr       bool
+		wantPermanent bool
+		wantToken     string
+	}{
+		{name: "200 with a token stores it", status: 200, body: `{"access_token":"issued-token"}`, wantToken: "issued-token"},
+		// Extra fields are what Salesforce actually returns; they must not interfere.
+		{
+			name:      "200 alongside other fields",
+			status:    200,
+			body:      `{"access_token":"issued-token","instance_url":"https://example.my.salesforce.com","token_type":"Bearer"}`,
+			wantToken: "issued-token",
+		},
+
+		// A rejected credential does not improve on retry, so it stops the daemon.
+		{name: "401 is permanent", status: 401, body: `{"error":"invalid_client"}`, wantErr: true, wantPermanent: true, wantToken: existingToken},
+		{name: "403 is permanent", status: 403, body: `{"error":"forbidden"}`, wantErr: true, wantPermanent: true, wantToken: existingToken},
+
+		// Everything else might pass later. A misconfigured flow lands here too --
+		// Salesforce answers an unenabled grant with 400 invalid_grant -- so this is
+		// deliberately retried rather than treated as fatal.
+		{name: "400 is retried", status: 400, body: `{"error":"invalid_grant","error_description":"request not supported on this domain"}`, wantErr: true, wantToken: existingToken},
+		{name: "500 is retried", status: 500, body: "upstream failure", wantErr: true, wantToken: existingToken},
+		{name: "503 is retried", status: 503, body: "", wantErr: true, wantToken: existingToken},
+
+		// A 200 that carries no usable token is a failure, not an empty success.
+		{name: "200 with no token", status: 200, body: `{}`, wantErr: true, wantToken: existingToken},
+		{name: "200 with an empty token", status: 200, body: `{"access_token":""}`, wantErr: true, wantToken: existingToken},
+		{name: "200 with an unparseable body", status: 200, body: "<html>a proxy error page</html>", wantErr: true, wantToken: existingToken},
+	}
+
+	for _, grant := range allGrants {
+		grant := grant
+		t.Run(grant, func(t *testing.T) {
+			for _, test := range tests {
+				test := test
+				t.Run(test.name, func(t *testing.T) {
+					tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(test.status)
+						_, _ = w.Write([]byte(test.body))
+					}))
+					defer tokenServer.Close()
+
+					bridge := bridgeForGrant(t, grant, tokenServer.URL)
+					bridge.oauthCurrentToken = existingToken
+
+					err, permanent := bridge.authorizeSalesforce()
+					if test.wantErr && err == nil {
+						t.Error("authorizeSalesforce succeeded, want an error")
+					}
+					if !test.wantErr && err != nil {
+						t.Errorf("authorizeSalesforce returned unexpected error: %v", err)
+					}
+					if permanent != test.wantPermanent {
+						t.Errorf("permanent = %v, want %v", permanent, test.wantPermanent)
+					}
+					if bridge.oauthCurrentToken != test.wantToken {
+						t.Errorf("token = %q, want %q", bridge.oauthCurrentToken, test.wantToken)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestAuthorizeSalesforceRetriesAnUnreachableEndpoint covers the transport failing outright.
+// A token endpoint that cannot be reached is a network problem, not a bad credential, so it
+// must not be classified as permanent.
+func TestAuthorizeSalesforceRetriesAnUnreachableEndpoint(t *testing.T) {
+	for _, grant := range allGrants {
+		grant := grant
+		t.Run(grant, func(t *testing.T) {
+			// Started and immediately closed, so the port is known to refuse connections.
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+			tokenURI := tokenServer.URL
+			tokenServer.Close()
+
+			bridge := bridgeForGrant(t, grant, tokenURI)
+
+			err, permanent := bridge.authorizeSalesforce()
+			if err == nil {
+				t.Fatal("authorizeSalesforce succeeded against a closed endpoint")
+			}
+			if permanent {
+				t.Error("an unreachable token endpoint was classified as a permanent failure")
+			}
+		})
+	}
+}
+
+// TestAuthorizeSalesforceRejectsAnUnresolvedGrant covers authorizeSalesforce's own guard.
+// newBridge resolves the grant to one of the constants and refuses to start otherwise, so
+// reaching the default branch means the two have drifted apart -- a bug rather than a
+// configuration problem. It must fail permanently and send nothing.
+func TestAuthorizeSalesforceRejectsAnUnresolvedGrant(t *testing.T) {
+	requests := 0
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"access_token":"issued-token"}`))
+	}))
+	defer tokenServer.Close()
+
+	endpoint, err := url.Parse(tokenServer.URL)
+	if err != nil {
+		t.Fatalf("failed parsing the test server URL: %v", err)
+	}
+
+	// The underscored spelling is the shape of the drift worth catching: it is the OAuth
+	// wire value, and resolveGrantType rejects it as OAUTH_GRANT_TYPE.
+	bridge := &Bridge{client: http.Client{}, oauthGrantType: "client_credentials", oauthURI: *endpoint}
+
+	err, permanent := bridge.authorizeSalesforce()
+	if err == nil {
+		t.Fatal("authorizeSalesforce accepted an unresolved grant type")
+	}
+	if !permanent {
+		t.Error("an unresolved grant type must fail permanently, retrying cannot fix it")
+	}
+	if requests != 0 {
+		t.Errorf("sent %d token requests for an unresolved grant, want 0", requests)
+	}
+	if bridge.oauthCurrentToken != "" {
+		t.Errorf("token = %q, want it left unset", bridge.oauthCurrentToken)
+	}
+}
+
+// TestEveryGrantYieldsABearerToken covers where the flows converge. However the token was
+// obtained, it reaches Salesforce the same way: as an Authorization: Bearer header on the
+// Apex REST request.
+func TestEveryGrantYieldsABearerToken(t *testing.T) {
+	for _, grant := range allGrants {
+		grant := grant
+		t.Run(grant, func(t *testing.T) {
+			token := "token-for-" + grant
+
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"access_token":"` + token + `"}`))
+			}))
+			defer tokenServer.Close()
+
+			var authorization string
+			apexServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authorization = r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer apexServer.Close()
+
+			bridge := bridgeForGrant(t, grant, tokenServer.URL)
+			if err, _ := bridge.authorizeSalesforce(); err != nil {
+				t.Fatalf("authorizeSalesforce returned unexpected error: %v", err)
+			}
+
+			request, err := http.NewRequest("GET", apexServer.URL, nil)
+			if err != nil {
+				t.Fatalf("failed building the Apex request: %v", err)
+			}
+			response, err, permanent := bridge.requestWithOauth(request)
+			if err != nil {
+				t.Fatalf("requestWithOauth returned unexpected error: %v", err)
+			}
+			if permanent {
+				t.Fatal("requestWithOauth reported a permanent failure on a successful request")
+			}
+			drainAndClose(response)
+
+			if want := "Bearer " + token; authorization != want {
+				t.Errorf("Authorization = %q, want %q", authorization, want)
+			}
+		})
+	}
+}
+
+// TestRequestWithOauthReauthorizesOnRejection covers token renewal. Salesforce expires a
+// session independently of the bridge, so a rejected request has to trigger a fresh
+// authorization -- otherwise every later request carries the same dead token.
+func TestRequestWithOauthReauthorizesOnRejection(t *testing.T) {
+	for _, status := range []int{401, 403} {
+		status := status
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			authorizations := 0
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authorizations++
+				_, _ = w.Write([]byte(`{"access_token":"renewed-token"}`))
+			}))
+			defer tokenServer.Close()
+
+			apexServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer apexServer.Close()
+
+			bridge := bridgeForGrant(t, GRANT_CLIENT_CREDENTIALS, tokenServer.URL)
+			bridge.oauthCurrentToken = "expired-token"
+
+			request, err := http.NewRequest("GET", apexServer.URL, nil)
+			if err != nil {
+				t.Fatalf("failed building the Apex request: %v", err)
+			}
+			response, err, permanent := bridge.requestWithOauth(request)
+			if err != nil {
+				t.Fatalf("requestWithOauth returned unexpected error: %v", err)
+			}
+			if permanent {
+				t.Fatal("a successful reauthorization must not report a permanent failure")
+			}
+			drainAndClose(response)
+
+			if authorizations != 1 {
+				t.Errorf("token endpoint called %d times after a %d, want 1", authorizations, status)
+			}
+			if bridge.oauthCurrentToken != "renewed-token" {
+				t.Errorf("token = %q, want the renewed token", bridge.oauthCurrentToken)
+			}
+		})
+	}
+}
+
+// TestRequestWithOauthPropagatesAPermanentAuthFailure covers the case where renewal itself
+// is refused. A credential Salesforce will not accept cannot be retried into working, so the
+// permanent flag has to reach the loops, which stop the daemon on it.
+func TestRequestWithOauthPropagatesAPermanentAuthFailure(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+	}))
+	defer tokenServer.Close()
+
+	apexServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer apexServer.Close()
+
+	bridge := bridgeForGrant(t, GRANT_CLIENT_CREDENTIALS, tokenServer.URL)
+	bridge.oauthCurrentToken = "expired-token"
+
+	request, err := http.NewRequest("GET", apexServer.URL, nil)
+	if err != nil {
+		t.Fatalf("failed building the Apex request: %v", err)
+	}
+	response, err, permanent := bridge.requestWithOauth(request)
+	if err == nil {
+		t.Fatal("requestWithOauth succeeded when reauthorization was refused")
+	}
+	if !permanent {
+		t.Error("a refused credential must be reported as permanent")
+	}
+	if response != nil {
+		drainAndClose(response)
+		t.Error("no response should be returned once authorization has failed")
 	}
 }
