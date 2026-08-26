@@ -89,7 +89,15 @@ public class LDConfig {
     // every variation call returns its fallback. Leaving it unset scopes the client to
     // records carrying no project, which is the pre-multi-project behavior.
     public Builder setProjectKey(String projectKey) {
-      this.projectKey = projectKey;
+      // The bridge trims the key it sends, and it treats a blank key as an absent one.
+      // Normalize the same way here so the two sides agree. An untrimmed key matches no
+      // records at all, and every variation call then returns its fallback.
+      if (String.isBlank(projectKey)) {
+        this.projectKey = null;
+      } else {
+        this.projectKey = projectKey.trim();
+      }
+
       return this;
     }
 
