@@ -80,6 +80,12 @@ Source the project key from one place in your Apex -- a custom setting or a sing
 rather than at each call site. A partial rollout where some entry points name the project and
 others do not is the one state the migration below does not account for.
 
+### Case sensitivity
+
+Keys that differ only by letter case are not supported, for projects, flags, or segments. Match
+the case of every key exactly as it appears in LaunchDarkly, in `LD_PROJECT_KEY` and in
+`setProjectKey` alike. Refer to "Key case sensitivity" in [the API documentation](../doc.md).
+
 ### Migrating an existing deployment
 
 Nothing needs backfilling: the bridge replaces all of a project's flag data on every push, and
