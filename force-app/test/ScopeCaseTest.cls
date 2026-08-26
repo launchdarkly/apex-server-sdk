@@ -1,12 +1,12 @@
-// Pins the one thing this SDK guarantees about project keys that differ only by letter case:
-// an unsupported key never destroys a supported project's data.
+// Pins the one thing this SDK guarantees about scope keys that differ only by letter case:
+// an unsupported key never destroys a supported scope's data.
 //
-// Salesforce matches text without regard to case, so a filter for project 'alpha' also returns
-// the records of project 'Alpha'. Reads are deliberately left alone -- which record an
+// Salesforce matches text without regard to case, so a filter for scope 'alpha' also returns
+// the records of scope 'Alpha'. Reads are deliberately left alone -- which record an
 // unsupported key resolves to is undefined. Deleting and draining are not, because they remove
-// data, and a typo in one bridge's project key must not wipe out another project.
+// data, and a typo in one bridge's scope key must not wipe out another scope.
 @isTest
-private class ProjectCaseTest {
+private class ScopeCaseTest {
   private static Map<String, Object> flagPayload(Integer version) {
     return (Map<String, Object>) JSON.deserializeUntyped(
       '{"flags":{"shared":{"version":' + version + ',"key":"shared","on":false,' +
@@ -17,7 +17,7 @@ private class ProjectCaseTest {
 
   // A push for 'alpha' must leave 'Alpha' alone, in both stores.
   @isTest
-  static void aPushDoesNotDeleteACollidingProject() {
+  static void aPushDoesNotDeleteACollidingScope() {
     new DataStore('Alpha').putAll(flagPayload(1));
     new DataStore('alpha').putAll(flagPayload(2));
 
@@ -25,27 +25,27 @@ private class ProjectCaseTest {
   }
 
   @isTest
-  static void aCachedPushDoesNotDeleteACollidingProject() {
+  static void aCachedPushDoesNotDeleteACollidingScope() {
     new CachingDataStore(30000, new GetTimeImpl(), 'Alpha').putAll(flagPayload(1));
     new CachingDataStore(30000, new GetTimeImpl(), 'alpha').putAll(flagPayload(2));
 
     System.assertEquals(2, [SELECT COUNT() FROM VersionedData__c]);
   }
 
-  // The first push of a new project finds no records of its own. It must still not fall back to
-  // deleting the records of the project whose key differs only by case.
+  // The first push of a new scope finds no records of its own. It must still not fall back to
+  // deleting the records of the scope whose key differs only by case.
   @isTest
-  static void aFirstPushDoesNotDeleteACollidingProject() {
+  static void aFirstPushDoesNotDeleteACollidingScope() {
     new DataStore('Alpha').putAll(flagPayload(1));
 
     System.assertEquals(1, [SELECT COUNT() FROM VersionedData__c]);
 
     new DataStore('alpha').putAll(flagPayload(2));
 
-    System.assertEquals(1, [SELECT COUNT() FROM VersionedData__c WHERE Project__c = 'Alpha' AND Version__c = 1]);
+    System.assertEquals(1, [SELECT COUNT() FROM VersionedData__c WHERE Scope__c = 'Alpha' AND Version__c = 1]);
   }
 
-  // A push must still replace its own project's records, which is the behavior the guard has to
+  // A push must still replace its own scope's records, which is the behavior the guard has to
   // preserve.
   @isTest
   static void aPushStillReplacesItsOwnRecords() {
@@ -56,10 +56,10 @@ private class ProjectCaseTest {
     System.assertEquals(2, new DataStore('Alpha').getVersioned('shared', 'flags').Version__c);
   }
 
-  // Records that carry no project are their own scope, and a push for a named project must not
-  // delete them. This is the state an org is in before it configures a project at all.
+  // Records that carry no scope are their own scope, and a push for a named scope must not
+  // delete them. This is the state an org is in before it configures a scope at all.
   @isTest
-  static void aPushDoesNotDeleteRecordsWithNoProject() {
+  static void aPushDoesNotDeleteRecordsWithNoScope() {
     new DataStore(null).putAll(flagPayload(1));
     new DataStore('Alpha').putAll(flagPayload(2));
 
@@ -69,19 +69,19 @@ private class ProjectCaseTest {
 
   // When both casings have events of their own, each bridge drains only its own.
   @isTest
-  static void aDrainDoesNotTakeACollidingProjectsEvents() {
+  static void aDrainDoesNotTakeACollidingScopesEvents() {
     new EventSink(1000, 'Alpha').sinkGeneric('custom', '{}');
     new EventSink(1000, 'alpha').sinkGeneric('custom', '{}');
 
     EventREST.prepareEvents('Alpha');
 
-    List<EventData__c> left = [SELECT Project__c FROM EventData__c];
+    List<EventData__c> left = [SELECT Scope__c FROM EventData__c];
     System.assertEquals(1, left.size());
-    System.assertEquals('alpha', left.get(0).Project__c);
+    System.assertEquals('alpha', left.get(0).Scope__c);
   }
 
-  // A bridge whose project key differs in case from the Apex client's still drains, because
-  // nothing else drains those events. Refer to CaseMatch.scopeEventsToProject.
+  // A bridge whose scope key differs in case from the Apex client's still drains, because
+  // nothing else drains those events. Refer to CaseMatch.eventsForScope.
   @isTest
   static void aDrainFallsBackWhenNoEventsMatchExactly() {
     new EventSink(1000, 'Alpha').sinkGeneric('custom', '{}');
@@ -92,11 +92,11 @@ private class ProjectCaseTest {
   }
 
   @isTest
-  static void aNullProjectIsItsOwnScope() {
-    System.assertEquals(true, CaseMatch.sameProject(null, null));
-    System.assertEquals(false, CaseMatch.sameProject(null, 'alpha'));
-    System.assertEquals(false, CaseMatch.sameProject('alpha', null));
-    System.assertEquals(true, CaseMatch.sameProject('alpha', 'alpha'));
-    System.assertEquals(false, CaseMatch.sameProject('Alpha', 'alpha'));
+  static void aNullScopeIsDistinctFromANamedOne() {
+    System.assertEquals(true, CaseMatch.sameScope(null, null));
+    System.assertEquals(false, CaseMatch.sameScope(null, 'alpha'));
+    System.assertEquals(false, CaseMatch.sameScope('alpha', null));
+    System.assertEquals(true, CaseMatch.sameScope('alpha', 'alpha'));
+    System.assertEquals(false, CaseMatch.sameScope('Alpha', 'alpha'));
   }
 }

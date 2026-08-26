@@ -211,7 +211,7 @@ func setMinimalBridgeEnv(t *testing.T) {
 	setEnv(t, "OAUTH_USERNAME", "test@example.invalid")
 	setEnv(t, "OAUTH_PASSWORD", "test-password")
 	setEnv(t, "OAUTH_SECRET", "test-secret")
-	for _, name := range []string{"OAUTH_JWT_KEY", "OAUTH_URI", "HTTP_TIMEOUT", "LD_BASE_URI", "LD_EVENTS_URI", "OAUTH_GRANT_TYPE", "LD_PROJECT_KEY"} {
+	for _, name := range []string{"OAUTH_JWT_KEY", "OAUTH_URI", "HTTP_TIMEOUT", "LD_BASE_URI", "LD_EVENTS_URI", "OAUTH_GRANT_TYPE", "LD_SCOPE_KEY"} {
 		unsetEnv(t, name)
 	}
 }
@@ -1834,21 +1834,21 @@ func TestRequestWithOauthPropagatesAPermanentAuthFailure(t *testing.T) {
 	}
 }
 
-// TestSalesforceRequestsCarryProjectHeader covers both directions of the multi-project
-// contract on the bridge side: the header rides Salesforce-bound requests when a project is
+// TestSalesforceRequestsCarryScopeHeader covers both directions of the scoping
+// contract on the bridge side: the header rides Salesforce-bound requests when a scope is
 // configured, and is absent entirely when one is not.
 //
 // The absence half matters as much as the presence half. An omitted header is what makes a
 // bridge that has not opted in indistinguishable from one running an older version, which is
 // what lets an operator upgrade the org and the bridge in either order.
-func TestSalesforceRequestsCarryProjectHeader(t *testing.T) {
+func TestSalesforceRequestsCarryScopeHeader(t *testing.T) {
 	for _, testCase := range []struct {
-		name       string
-		projectKey string
-		want       string
+		name     string
+		scopeKey string
+		want     string
 	}{
-		{name: "configured", projectKey: "gps", want: "gps"},
-		{name: "unset", projectKey: "", want: ""},
+		{name: "configured", scopeKey: "gps", want: "gps"},
+		{name: "unset", scopeKey: "", want: ""},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			var captured string
@@ -1856,11 +1856,11 @@ func TestSalesforceRequestsCarryProjectHeader(t *testing.T) {
 
 			bridge := newTestBridge(t, "http://unused.invalid", "http://unused.invalid")
 			bridge.oauthCurrentToken = "test-token"
-			bridge.projectKey = testCase.projectKey
+			bridge.scopeKey = testCase.scopeKey
 
 			sfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				captured = r.Header.Get(PROJECT_HEADER)
-				_, present = r.Header[PROJECT_HEADER]
+				captured = r.Header.Get(SCOPE_HEADER)
+				_, present = r.Header[SCOPE_HEADER]
 				bridge.cancel()
 				_, _ = w.Write([]byte(`[]`))
 			}))
@@ -1872,33 +1872,33 @@ func TestSalesforceRequestsCarryProjectHeader(t *testing.T) {
 			}
 
 			if captured != testCase.want {
-				t.Errorf("%s = %q, want %q", PROJECT_HEADER, captured, testCase.want)
+				t.Errorf("%s = %q, want %q", SCOPE_HEADER, captured, testCase.want)
 			}
-			if testCase.projectKey == "" && present {
-				t.Errorf("%s was sent with an unset project key; it must be omitted so the "+
-					"request is indistinguishable from an older bridge's", PROJECT_HEADER)
+			if testCase.scopeKey == "" && present {
+				t.Errorf("%s was sent with an unset scope key; it must be omitted so the "+
+					"request is indistinguishable from an older bridge's", SCOPE_HEADER)
 			}
 		})
 	}
 }
 
-// TestNewBridgeResolvesProjectKey covers LD_PROJECT_KEY through newBridge rather than by
+// TestNewBridgeResolvesScopeKey covers LD_SCOPE_KEY through newBridge rather than by
 // reading the variable back directly, so the trimming and the optionality are asserted on the
 // value the bridge actually uses.
 //
 // The distinction between unset and whitespace-only matters: both must yield an empty key,
-// because an empty key is what causes the project header to be omitted entirely, and that
+// because an empty key is what causes the scope header to be omitted entirely, and that
 // omission is what lets an org and a bridge be upgraded in either order.
-func TestNewBridgeResolvesProjectKey(t *testing.T) {
+func TestNewBridgeResolvesScopeKey(t *testing.T) {
 	tests := []struct {
 		name  string
 		value string
 		set   bool
 		want  string
 	}{
-		{name: "unset yields no project", set: false, want: ""},
-		{name: "empty yields no project", value: "", set: true, want: ""},
-		{name: "whitespace only yields no project", value: "   ", set: true, want: ""},
+		{name: "unset yields no scope", set: false, want: ""},
+		{name: "empty yields no scope", value: "", set: true, want: ""},
+		{name: "whitespace only yields no scope", value: "   ", set: true, want: ""},
 		{name: "plain value", value: "gps", set: true, want: "gps"},
 		{name: "surrounding whitespace is trimmed", value: "  gps  ", set: true, want: "gps"},
 	}
@@ -1908,17 +1908,17 @@ func TestNewBridgeResolvesProjectKey(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			setMinimalBridgeEnv(t)
 			if test.set {
-				setEnv(t, "LD_PROJECT_KEY", test.value)
+				setEnv(t, "LD_SCOPE_KEY", test.value)
 			} else {
-				unsetEnv(t, "LD_PROJECT_KEY")
+				unsetEnv(t, "LD_SCOPE_KEY")
 			}
 
 			bridge, err := newBridge()
 			if err != nil {
 				t.Fatalf("newBridge returned unexpected error: %v", err)
 			}
-			if bridge.projectKey != test.want {
-				t.Errorf("projectKey = %q, want %q", bridge.projectKey, test.want)
+			if bridge.scopeKey != test.want {
+				t.Errorf("scopeKey = %q, want %q", bridge.scopeKey, test.want)
 			}
 		})
 	}

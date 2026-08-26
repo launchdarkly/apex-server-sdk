@@ -1,27 +1,28 @@
 public class DataStore implements DataStoreInterface {
-  // The LaunchDarkly project this store is scoped to. Null scopes it to records with no
-  // project, which is what an org looks like before multi-project support and what a
-  // bridge running without a project key continues to write.
+  // The LaunchDarkly scope this store reads and writes. A scope is one environment of one
+  // project, because a bridge authenticates with an SDK key and an SDK key names a single
+  // environment. Null scopes the store to records that carry no scope, which is what an org
+  // looks like before scoping and what a bridge running without a scope key keeps writing.
   //
-  // The project is bound here rather than passed per call so that every path through
-  // Evaluator -- including prerequisite and segment lookups, which are made by key alone
-  // -- stays within one project without Evaluator needing to know projects exist.
-  private final String project;
+  // The scope is bound here rather than passed per call so that every path through Evaluator
+  // -- including prerequisite and segment lookups, which are made by key alone -- stays
+  // inside one scope without Evaluator needing to know scopes exist.
+  private final String scope;
 
   // Retained so existing callers keep compiling.
   public DataStore() {
     this(null);
   }
 
-  public DataStore(String project) {
-    this.project = project;
+  public DataStore(String scope) {
+    this.scope = scope;
   }
 
   public VersionedData__C getVersioned(String key, String kind) {
     List<VersionedData__c> versioned = [
       SELECT Version__c, Raw__c, Key__c, Kind__c
       FROM VersionedData__c
-      WHERE Key__c = :key AND Kind__c = :kind AND Project__c = :project
+      WHERE Key__c = :key AND Kind__c = :kind AND Scope__c = :scope
       LIMIT 1
     ];
 
@@ -58,7 +59,7 @@ public class DataStore implements DataStoreInterface {
     List<VersionedData__c> flags = [
       SELECT Version__c, Raw__c, Key__c, Kind__c
       FROM VersionedData__c
-      WHERE Kind__c = 'flags' AND Project__c = :project
+      WHERE Kind__c = 'flags' AND Scope__c = :scope
     ];
 
     for (VersionedData__C flag : flags) {
@@ -73,16 +74,16 @@ public class DataStore implements DataStoreInterface {
   }
 
   public void putAll(Map<String, Object> kinds) {
-    // Delete only this project's store values. An unscoped delete here would wipe every
-    // other project's flag data on every push.
+    // Delete only this scope's store values. An unscoped delete here would wipe every other
+    // scope's flag data on every push.
     //
-    // The project filter matches other casings of the key as well, so narrow the rows to this
-    // exact project before deleting them. Keys that differ only by case are not supported, but
-    // an unsupported key must not destroy a supported project's data: without this, a bridge
+    // The scope filter matches other casings of the key as well, so narrow the rows to this
+    // exact scope before deleting them. Keys that differ only by case are not supported, but
+    // an unsupported key must not destroy a supported scope's data: without this, a bridge
     // started with 'alpha' deletes everything belonging to 'Alpha' on every push.
-    delete CaseMatch.onlyProject(
-      [SELECT Key__c, Project__c FROM VersionedData__c WHERE Project__c = :project],
-      this.project
+    delete CaseMatch.onlyScope(
+      [SELECT Key__c, Scope__c FROM VersionedData__c WHERE Scope__c = :scope],
+      this.scope
     );
 
     List<VersionedData__c> versionData = new List<VersionedData__c>();
@@ -94,7 +95,7 @@ public class DataStore implements DataStoreInterface {
       for (String key : features.keySet()) {
         Map<String, Object> feature = (Map<String, Object>) features.get(key);
 
-        VersionedData versioned = new VersionedData(kind, feature, this.project);
+        VersionedData versioned = new VersionedData(kind, feature, this.scope);
 
         versionData.add(versioned.getSObject());
       }

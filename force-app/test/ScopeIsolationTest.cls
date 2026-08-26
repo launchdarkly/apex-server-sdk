@@ -1,4 +1,4 @@
-// Pins the invariant that one project's data is never visible to, drained by, or deleted by
+// Pins the invariant that one scope's data is never visible to, drained by, or deleted by
 // another's.
 //
 // This exists as one behavioural suite rather than as assertions bolted onto each store and
@@ -8,15 +8,15 @@
 // with a capital C. Tests that assert the observable property catch a missed filter at any
 // site, including sites that do not exist yet.
 //
-// Every fixture below deliberately uses the SAME flag and segment keys in both projects.
+// Every fixture below deliberately uses the SAME flag and segment keys in both scopes.
 // Keys are not unique across LaunchDarkly projects, so colliding keys are the normal case,
-// and getVersioned ends in LIMIT 1 -- an unscoped lookup returns an arbitrary project's row.
+// and getVersioned ends in LIMIT 1 -- an unscoped lookup returns an arbitrary scope's row.
 @isTest
-private class MultiProjectIsolationTest {
+private class ScopeIsolationTest {
   private static final String ALPHA = 'alpha';
   private static final String BETA = 'beta';
 
-  // Same key, different version, so the version identifies which project a row came from.
+  // Same key, different version, so the version identifies which scope a row came from.
   //
   // The flag is spelled out in full rather than as just a key and version. A minimal object
   // round-trips through getVersioned but throws inside DataModel.Flag, which allFlags swallows
@@ -36,7 +36,7 @@ private class MultiProjectIsolationTest {
   }
 
   @isTest
-  static void flagsAreIsolatedByProject() {
+  static void flagsAreIsolatedByScope() {
     new DataStore(ALPHA).putAll(parse(flagPayload(1)));
     new DataStore(BETA).putAll(parse(flagPayload(2)));
 
@@ -48,7 +48,7 @@ private class MultiProjectIsolationTest {
   }
 
   @isTest
-  static void putAllOnlyDeletesItsOwnProject() {
+  static void putAllOnlyDeletesItsOwnScope() {
     new DataStore(ALPHA).putAll(parse(flagPayload(1)));
     new DataStore(BETA).putAll(parse(flagPayload(2)));
 
@@ -61,22 +61,22 @@ private class MultiProjectIsolationTest {
   }
 
   @isTest
-  static void legacyNullProjectIsItsOwnScope() {
-    // What an org looks like before multi-project support, and what a bridge without a
-    // project key keeps writing during a migration.
+  static void legacyNullScopeIsIsolated() {
+    // What an org looks like before scoping support, and what a bridge without a
+    // scope key keeps writing during a migration.
     new DataStore().putAll(parse(flagPayload(9)));
     new DataStore(ALPHA).putAll(parse(flagPayload(1)));
 
     System.assertEquals(9, new DataStore().getVersioned('shared', 'flags').Version__c);
     System.assertEquals(1, new DataStore(ALPHA).getVersioned('shared', 'flags').Version__c);
 
-    // The named project's push must not disturb the legacy rows still serving old clients.
+    // The named scope's push must not disturb the legacy rows still serving old clients.
     new DataStore(ALPHA).putAll(parse('{}'));
     System.assertNotEquals(null, new DataStore().getFlag('shared'));
   }
 
   @isTest
-  static void cachingStoreIsolatesByProject() {
+  static void cachingStoreIsolatesByScope() {
     new DataStore(ALPHA).putAll(parse(flagPayload(1)));
     new DataStore(BETA).putAll(parse(flagPayload(2)));
 
@@ -90,7 +90,7 @@ private class MultiProjectIsolationTest {
   }
 
   @isTest
-  static void cachingStorePutAllOnlyDeletesItsOwnProject() {
+  static void cachingStorePutAllOnlyDeletesItsOwnScope() {
     new CachingDataStore(60000, new GetTimeMock(), ALPHA).putAll(parse(flagPayload(1)));
     new CachingDataStore(60000, new GetTimeMock(), BETA).putAll(parse(flagPayload(2)));
 
@@ -101,7 +101,7 @@ private class MultiProjectIsolationTest {
   }
 
   @isTest
-  static void segmentsAreIsolatedByProject() {
+  static void segmentsAreIsolatedByScope() {
     new DataStore(ALPHA).putAll(parse(segmentPayload(1)));
     new DataStore(BETA).putAll(parse(segmentPayload(2)));
 
@@ -109,11 +109,11 @@ private class MultiProjectIsolationTest {
     System.assertEquals(2, new DataStore(BETA).getVersioned('shared', 'segments').Version__c);
   }
 
-  // The subtlest case, and the reason the project is bound to the store rather than passed
+  // The subtlest case, and the reason the scope is bound to the store rather than passed
   // per call: Evaluator resolves prerequisites by key alone. A leak here does not produce
   // missing data, it produces a confidently wrong answer.
   //
-  // Both projects hold an identical 'gated' flag whose prerequisite is 'prereq'. Alpha's
+  // Both scopes hold an identical 'gated' flag whose prerequisite is 'prereq'. Alpha's
   // prereq is on and serves the required variation, so 'gated' falls through to true.
   // Beta's prereq is off, which fails the prerequisite regardless of variation, so 'gated'
   // returns its off variation, false.
@@ -133,72 +133,72 @@ private class MultiProjectIsolationTest {
   }
 
   @isTest
-  static void prerequisiteResolvesWithinProject() {
+  static void prerequisiteResolvesWithinScope() {
     new DataStore(ALPHA).putAll(parse(gatedPayload(true)));
     new DataStore(BETA).putAll(parse(gatedPayload(false)));
 
     LDUser user = new LDUser.Builder('user-key').build();
 
-    LDClient alphaClient = new LDClient(new LDConfig.Builder().setProjectKey(ALPHA).build());
-    LDClient betaClient = new LDClient(new LDConfig.Builder().setProjectKey(BETA).build());
+    LDClient alphaClient = new LDClient(new LDConfig.Builder().setScopeKey(ALPHA).build());
+    LDClient betaClient = new LDClient(new LDConfig.Builder().setScopeKey(BETA).build());
 
     System.assertEquals(true, alphaClient.boolVariation(user, 'gated', false));
     System.assertEquals(false, betaClient.boolVariation(user, 'gated', true));
   }
 
   @isTest
-  static void eventDrainIsolatesByProject() {
+  static void eventDrainIsolatesByScope() {
     insert new List<EventData__c>{
-      new EventData__c(Kind__c = 'identify', Raw__c = '{}', Project__c = ALPHA),
-      new EventData__c(Kind__c = 'identify', Raw__c = '{}', Project__c = BETA),
-      new EventData__c(Kind__c = 'identify', Raw__c = '{}', Project__c = null)
+      new EventData__c(Kind__c = 'identify', Raw__c = '{}', Scope__c = ALPHA),
+      new EventData__c(Kind__c = 'identify', Raw__c = '{}', Scope__c = BETA),
+      new EventData__c(Kind__c = 'identify', Raw__c = '{}', Scope__c = null)
     };
 
-    // An unscoped drain delivers another project's events to this bridge's environment
+    // An unscoped drain delivers another scope's events to this bridge's environment
     // under this bridge's SDK key, and those events carry user attributes.
     EventREST.prepareEvents(ALPHA);
 
-    System.assertEquals(0, [SELECT COUNT() FROM EventData__c WHERE Project__c = :ALPHA]);
-    System.assertEquals(1, [SELECT COUNT() FROM EventData__c WHERE Project__c = :BETA]);
-    System.assertEquals(1, [SELECT COUNT() FROM EventData__c WHERE Project__c = null]);
+    System.assertEquals(0, [SELECT COUNT() FROM EventData__c WHERE Scope__c = :ALPHA]);
+    System.assertEquals(1, [SELECT COUNT() FROM EventData__c WHERE Scope__c = :BETA]);
+    System.assertEquals(1, [SELECT COUNT() FROM EventData__c WHERE Scope__c = null]);
   }
 
   @isTest
-  static void eventQueueCapIsScopedByProject() {
+  static void eventQueueCapIsPerScope() {
     EventSink alphaSink = new EventSink(2, ALPHA);
     alphaSink.sinkGeneric('identify', '{}');
     alphaSink.sinkGeneric('identify', '{}');
     alphaSink.sinkGeneric('identify', '{}');
 
-    System.assertEquals(2, [SELECT COUNT() FROM EventData__c WHERE Project__c = :ALPHA]);
+    System.assertEquals(2, [SELECT COUNT() FROM EventData__c WHERE Scope__c = :ALPHA]);
 
     // Alpha being at its cap must not stop beta recording. With an unscoped count, another
-    // project's undrained events silently stop this one from recording anything at all.
+    // scope's undrained events silently stop this one from recording anything at all.
     EventSink betaSink = new EventSink(2, BETA);
     betaSink.sinkGeneric('identify', '{}');
 
-    System.assertEquals(1, [SELECT COUNT() FROM EventData__c WHERE Project__c = :BETA]);
+    System.assertEquals(1, [SELECT COUNT() FROM EventData__c WHERE Scope__c = :BETA]);
   }
 
   @isTest
-  static void batchingSinkStampsProject() {
+  static void batchingSinkStampsScope() {
     BatchingEventSink sink = new BatchingEventSink(10, ALPHA);
     sink.sinkGeneric('identify', '{}');
     sink.close();
 
-    System.assertEquals(1, [SELECT COUNT() FROM EventData__c WHERE Project__c = :ALPHA]);
+    System.assertEquals(1, [SELECT COUNT() FROM EventData__c WHERE Scope__c = :ALPHA]);
   }
 
   @isTest
   static void headerReadIsCaseInsensitiveAndTreatsBlankAsUnset() {
     RestRequest request = new RestRequest();
-    request.headers.put('ld-project-key', ALPHA);
-    System.assertEquals(ALPHA, ProjectHeader.read(request, EventREST.PROJECT_HEADER));
+    request.headers.put('ld-scope-key', ALPHA);
+    System.assertEquals(ALPHA, ScopeHeader.read(request, EventREST.SCOPE_HEADER));
 
     RestRequest blank = new RestRequest();
-    blank.headers.put(EventREST.PROJECT_HEADER, '   ');
-    System.assertEquals(null, ProjectHeader.read(blank, EventREST.PROJECT_HEADER));
+    blank.headers.put(EventREST.SCOPE_HEADER, '   ');
+    System.assertEquals(null, ScopeHeader.read(blank, EventREST.SCOPE_HEADER));
 
-    System.assertEquals(null, ProjectHeader.read(new RestRequest(), EventREST.PROJECT_HEADER));
+    System.assertEquals(null, ScopeHeader.read(new RestRequest(), EventREST.SCOPE_HEADER));
   }
 }

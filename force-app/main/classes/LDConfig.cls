@@ -3,20 +3,20 @@ public class LDConfig {
   private final Integer maxEvents;
   private final Integer ttl;
   private final Boolean batchEvents;
-  private final String projectKey;
+  private final String scopeKey;
 
   private LDConfig(
     Boolean allAttributesPrivate,
     Integer maxEvents,
     Integer ttl,
     Boolean batchEvents,
-    String projectKey
+    String scopeKey
   ) {
     this.allAttributesPrivate = allAttributesPrivate;
     this.maxEvents = maxEvents;
     this.ttl = ttl;
     this.batchEvents = batchEvents;
-    this.projectKey = projectKey;
+    this.scopeKey = scopeKey;
   }
 
   public Boolean getAllAttributesPrivate() {
@@ -35,8 +35,8 @@ public class LDConfig {
     return this.batchEvents;
   }
 
-  public String getProjectKey() {
-    return this.projectKey;
+  public String getScopeKey() {
+    return this.scopeKey;
   }
 
   public class Builder {
@@ -44,14 +44,14 @@ public class LDConfig {
     private Integer maxEvents;
     private Integer ttl;
     private Boolean batchEvents;
-    private String projectKey;
+    private String scopeKey;
 
     public Builder() {
       this.allAttributesPrivate = false;
       this.maxEvents = 1000;
       this.ttl = null;
       this.batchEvents = false;
-      this.projectKey = null;
+      this.scopeKey = null;
     }
 
     public Builder setAllAttributesPrivate(Boolean allAttributesPrivate) {
@@ -84,18 +84,18 @@ public class LDConfig {
       return this;
     }
 
-    // The LaunchDarkly project this client reads and writes. It must match the project key
+    // The LaunchDarkly scope this client reads and writes. It must match the scope key
     // configured on the bridge that populates this org, or evaluation finds no flag data and
     // every variation call returns its fallback. Leaving it unset scopes the client to
-    // records carrying no project, which is the pre-multi-project behavior.
-    public Builder setProjectKey(String projectKey) {
+    // records carrying no scope, which is the behavior from before scoping existed.
+    public Builder setScopeKey(String scopeKey) {
       // The bridge trims the key it sends, and it treats a blank key as an absent one.
       // Normalize the same way here so the two sides agree. An untrimmed key matches no
       // records at all, and every variation call then returns its fallback.
-      if (String.isBlank(projectKey)) {
-        this.projectKey = null;
+      if (String.isBlank(scopeKey)) {
+        this.scopeKey = null;
       } else {
-        this.projectKey = projectKey.trim();
+        this.scopeKey = scopeKey.trim();
       }
 
       return this;
@@ -107,7 +107,7 @@ public class LDConfig {
         this.maxEvents,
         this.ttl,
         this.batchEvents,
-        this.projectKey
+        this.scopeKey
       );
     }
   }

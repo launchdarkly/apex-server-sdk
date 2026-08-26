@@ -51,38 +51,38 @@ private class LDConfigTest {
   }
 
   @isTest
-  static void getDefaultProjectKeySetting() {
+  static void getDefaultScopeKeySetting() {
     LDConfig config = new LDConfig.Builder().build();
 
-    System.assertEquals(config.getProjectKey(), null);
+    System.assertEquals(config.getScopeKey(), null);
   }
 
   @isTest
-  static void setProjectKeySetting() {
-    LDConfig config = new LDConfig.Builder().setProjectKey('gps').build();
+  static void setScopeKeySetting() {
+    LDConfig config = new LDConfig.Builder().setScopeKey('gps').build();
 
-    System.assertEquals(config.getProjectKey(), 'gps');
+    System.assertEquals(config.getScopeKey(), 'gps');
   }
 
   @isTest
-  static void setProjectKeyTrimsSurroundingWhitespace() {
-    System.assertEquals(new LDConfig.Builder().setProjectKey(' gps ').build().getProjectKey(), 'gps');
-    System.assertEquals(new LDConfig.Builder().setProjectKey('gps ').build().getProjectKey(), 'gps');
-    System.assertEquals(new LDConfig.Builder().setProjectKey(' gps').build().getProjectKey(), 'gps');
+  static void setScopeKeyTrimsSurroundingWhitespace() {
+    System.assertEquals(new LDConfig.Builder().setScopeKey(' gps ').build().getScopeKey(), 'gps');
+    System.assertEquals(new LDConfig.Builder().setScopeKey('gps ').build().getScopeKey(), 'gps');
+    System.assertEquals(new LDConfig.Builder().setScopeKey(' gps').build().getScopeKey(), 'gps');
   }
 
   @isTest
-  static void setProjectKeyTreatsBlankAsUnset() {
-    System.assertEquals(new LDConfig.Builder().setProjectKey(null).build().getProjectKey(), null);
-    System.assertEquals(new LDConfig.Builder().setProjectKey('').build().getProjectKey(), null);
-    System.assertEquals(new LDConfig.Builder().setProjectKey('   ').build().getProjectKey(), null);
+  static void setScopeKeyTreatsBlankAsUnset() {
+    System.assertEquals(new LDConfig.Builder().setScopeKey(null).build().getScopeKey(), null);
+    System.assertEquals(new LDConfig.Builder().setScopeKey('').build().getScopeKey(), null);
+    System.assertEquals(new LDConfig.Builder().setScopeKey('   ').build().getScopeKey(), null);
   }
 
   @isTest
-  static void setProjectKeyKeepsLetterCase() {
-    // LaunchDarkly project keys are case sensitive. The setter must not fold the case, even
+  static void setScopeKeyKeepsLetterCase() {
+    // LaunchDarkly scope keys are case sensitive. The setter must not fold the case, even
     // though Salesforce matches the stored field without regard to case.
-    System.assertEquals(new LDConfig.Builder().setProjectKey('MyProject').build().getProjectKey(), 'MyProject');
-    System.assertEquals(new LDConfig.Builder().setProjectKey(' MyProject ').build().getProjectKey(), 'MyProject');
+    System.assertEquals(new LDConfig.Builder().setScopeKey('MyScope').build().getScopeKey(), 'MyScope');
+    System.assertEquals(new LDConfig.Builder().setScopeKey(' MyScope ').build().getScopeKey(), 'MyScope');
   }
 }

@@ -9,7 +9,7 @@ Download a release archive from the [GitHub Releases](https://github.com/launchd
 ## Case sensitivity
 
 Keys that differ only by letter case are not supported, for flags, for segments, or for
-projects. Match the case of every key exactly as it appears in LaunchDarkly. Refer to "Key case
+scope keys. Match the case of every key exactly as it appears in LaunchDarkly. Refer to "Key case
 sensitivity" in the [API documentation](doc.md) for what the SDK does and does not guarantee.
 
 ## Learn more

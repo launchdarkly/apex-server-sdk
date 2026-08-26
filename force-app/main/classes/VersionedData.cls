@@ -3,16 +3,16 @@ public class VersionedData {
   private String key;
   private String kind;
   private String raw;
-  private String project;
+  private String scope;
 
-  // Retained so existing callers keep compiling. A null project means the record is
-  // not associated with any particular LaunchDarkly project.
+  // Retained so existing callers keep compiling. A null scope means the record belongs to
+  // no particular LaunchDarkly project and environment.
   public VersionedData(String kind, Map<String, Object> obj) {
     this(kind, obj, null);
   }
 
-  public VersionedData(String kind, Map<String, Object> obj, String project) {
-    this.project = project;
+  public VersionedData(String kind, Map<String, Object> obj, String scope) {
+    this.scope = scope;
     this.version = (Integer) obj.get('version');
     this.key = (String) obj.get('key');
     this.kind = kind;
@@ -40,8 +40,8 @@ public class VersionedData {
     return this.raw;
   }
 
-  public String getProject() {
-    return this.project;
+  public String getScope() {
+    return this.scope;
   }
 
   public VersionedData__c getSObject() {
@@ -50,7 +50,7 @@ public class VersionedData {
     model.Version__c = this.version;
     model.Raw__c = this.raw;
     model.Kind__c = this.kind;
-    model.Project__c = this.project;
+    model.Scope__c = this.scope;
 
     return model;
   }

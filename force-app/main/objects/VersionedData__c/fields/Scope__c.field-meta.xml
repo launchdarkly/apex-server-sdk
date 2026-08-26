@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Scope__c</fullName>
+    <description>Identifies which LaunchDarkly data this record belongs to. This is not the LaunchDarkly project key. A bridge authenticates with an SDK key, and an SDK key is scoped to one environment of one project, so this value must be unique for every project and environment pair that shares the org. Two environments of one project need two different values here, such as myproject-production and myproject-test. Null means the record predates scoping, or the bridge and the SDK are running without an explicit scope key.</description>
+    <externalId>false</externalId>
+    <label>LaunchDarkly scope</label>
+    <required>false</required>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <length>255</length>
+</CustomField>

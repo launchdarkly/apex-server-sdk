@@ -1,15 +1,15 @@
 @RestResource(urlMapping='/event')
 global with sharing class EventREST {
-  // The bridge names its project in a header rather than the body or the URL. A header is
-  // invisible to a bridge or an org that predates multi-project support, so old and new
-  // versions of each side interoperate in either upgrade order.
-  public static final String PROJECT_HEADER = 'LD-Project-Key';
+  // The bridge names its scope in a header rather than the body or the URL. A header is
+  // invisible to a bridge or an org that predates scoping, so old and new versions of each
+  // side interoperate in either upgrade order.
+  public static final String SCOPE_HEADER = 'LD-Scope-Key';
 
   @HttpGet
   global static void doGet() {
     RestContext.response.addHeader('Content-Type', 'application/json');
     RestContext.response.responseBody = Blob.valueOf(
-      JSON.serialize(EventREST.prepareEvents(ProjectHeader.read(RestContext.request, PROJECT_HEADER)))
+      JSON.serialize(EventREST.prepareEvents(ScopeHeader.read(RestContext.request, SCOPE_HEADER)))
     );
   }
 
@@ -18,18 +18,18 @@ global with sharing class EventREST {
     return prepareEvents(null);
   }
 
-  public static Object prepareEvents(String project) {
+  public static Object prepareEvents(String scope) {
     EventProcessor processor = new EventProcessor(new GetTimeImpl());
 
-    // Scoped so a bridge only ever drains and deletes its own project's events. An
-    // unscoped drain delivers another project's events to this bridge's environment under
-    // this bridge's SDK key, and those events carry user attributes.
+    // Scoped so a bridge only ever drains and deletes its own scope's events. An unscoped
+    // drain delivers another scope's events to this bridge's environment under this bridge's
+    // SDK key, and those events carry user attributes.
     //
-    // The project filter matches other casings as well, so narrow the rows before the drain
-    // deletes them. Refer to scopeEventsToProject for why this one keeps a fallback.
-    List<EventData__c> events = CaseMatch.scopeEventsToProject(
-      [SELECT Kind__c, Raw__c, Project__c FROM EventData__c WHERE Project__c = :project],
-      project
+    // The scope filter matches other casings as well, so narrow the rows before the drain
+    // deletes them. Refer to eventsForScope for why this one keeps a fallback.
+    List<EventData__c> events = CaseMatch.eventsForScope(
+      [SELECT Kind__c, Raw__c, Scope__c FROM EventData__c WHERE Scope__c = :scope],
+      scope
     );
 
     for (EventData__c event : events) {
