@@ -75,7 +75,15 @@ public class DataStore implements DataStoreInterface {
   public void putAll(Map<String, Object> kinds) {
     // Delete only this project's store values. An unscoped delete here would wipe every
     // other project's flag data on every push.
-    delete [SELECT Key__c FROM VersionedData__c WHERE Project__c = :project];
+    //
+    // The project filter matches other casings of the key as well, so narrow the rows to this
+    // exact project before deleting them. Keys that differ only by case are not supported, but
+    // an unsupported key must not destroy a supported project's data: without this, a bridge
+    // started with 'alpha' deletes everything belonging to 'Alpha' on every push.
+    delete CaseMatch.onlyProject(
+      [SELECT Key__c, Project__c FROM VersionedData__c WHERE Project__c = :project],
+      this.project
+    );
 
     List<VersionedData__c> versionData = new List<VersionedData__c>();
 

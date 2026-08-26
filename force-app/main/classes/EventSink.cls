@@ -36,6 +36,11 @@ public class EventSink implements EventSinkInterface {
     // Scoped to this project so maxEventsInQueue is a per-project cap. An unscoped count
     // lets another project's undrained events -- including rows orphaned by a
     // decommissioned bridge -- silently stop this project from recording events at all.
+    //
+    // This count still includes a project whose key differs only by case. Salesforce cannot
+    // count them apart: COUNT and GROUP BY both fold the casings together, and selecting the
+    // rows to count them here would fail on a large queue. An overcount only trips the cap
+    // early, which drops events rather than exceeding the cap, so it fails safe.
     Integer count = [SELECT COUNT() FROM EventData__c WHERE Project__c = :project];
 
     if (count >= this.maxEvents) {

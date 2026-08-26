@@ -93,14 +93,14 @@ public class CachingDataStore implements DataStoreInterface {
   }
 
   public void putAll(Map<String, Object> kinds) {
-    // Delete only this project's store values. An unscoped delete here would wipe every
-    // other project's flag data on every push.
+    // Delete only this project's store values. Refer to the note on putAll in DataStore for
+    // why the delete narrows to this exact project.
     List<VersionedData__c> existingFeatures = [
-      SELECT Key__c
+      SELECT Key__c, Project__c
       FROM VersionedData__c
       WHERE Project__c = :project
     ];
-    delete existingFeatures;
+    delete CaseMatch.onlyProject(existingFeatures, this.project);
 
     // iterate over kinds of features such as flags / segments
     for (String kind : kinds.keySet()) {

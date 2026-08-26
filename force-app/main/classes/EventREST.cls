@@ -24,11 +24,13 @@ global with sharing class EventREST {
     // Scoped so a bridge only ever drains and deletes its own project's events. An
     // unscoped drain delivers another project's events to this bridge's environment under
     // this bridge's SDK key, and those events carry user attributes.
-    List<EventData__c> events = [
-      SELECT Kind__c, Raw__c
-      FROM EventData__c
-      WHERE Project__c = :project
-    ];
+    //
+    // The project filter matches other casings as well, so narrow the rows before the drain
+    // deletes them. Refer to scopeEventsToProject for why this one keeps a fallback.
+    List<EventData__c> events = CaseMatch.scopeEventsToProject(
+      [SELECT Kind__c, Raw__c, Project__c FROM EventData__c WHERE Project__c = :project],
+      project
+    );
 
     for (EventData__c event : events) {
       switch on event.Kind__c {
