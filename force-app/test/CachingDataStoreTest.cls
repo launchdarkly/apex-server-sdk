@@ -84,9 +84,11 @@ private class CachingDataStoreTest {
     System.assertEquals(flag.version, 53);
   }
 
+  // LDClient sends a zero TTL to DataStore, but this class still supports it: a zero-length
+  // cache is always expired, so each lookup reloads and then answers from what it loaded.
   @isTest
-  static void negativeCacheIsAlwaysExpired() {
-    CachingDataStore store = new CachingDataStore(-1, new GetTimeMock());
+  static void zeroTtlReloadsOnEveryLookup() {
+    CachingDataStore store = new CachingDataStore(0, new GetTimeMock());
 
     store.putAll((Map<String, Object>) JSON.deserializeUntyped(CachingDataStoreTest.payload1));
 
@@ -97,5 +99,52 @@ private class CachingDataStoreTest {
 
     flag = store.getFlag('hello');
     System.assertEquals(flag.version, 53);
+  }
+
+  // The reload has to leave the cache populated, not merely clear it. This is the shape of the
+  // original defect: a zero TTL returned before loading, so every lookup answered null.
+  @isTest
+  static void zeroTtlStillServesEveryLookupKind() {
+    CachingDataStore store = new CachingDataStore(0, new GetTimeMock());
+
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(CachingDataStoreTest.payload1));
+
+    System.assertEquals(store.getFlag('hello').version, 52);
+    System.assertEquals(store.getSegment('hello').version, 50);
+    System.assertEquals(store.allFlags().size(), 1);
+  }
+
+  @isTest
+  static void negativeTtlCachesIndefinitely() {
+    GetTimeMock mockTime = new GetTimeMock();
+    CachingDataStore store = new CachingDataStore(-1, mockTime);
+
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(CachingDataStoreTest.payload1));
+
+    DataModel.Flag flag = store.getFlag('hello');
+    System.assertEquals(flag.version, 52);
+
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(CachingDataStoreTest.payload2));
+
+    flag = store.getFlag('hello');
+    System.assertEquals(flag.version, 52);
+
+    // Advance time far past any plausible TTL. A negative TTL never expires, so the store
+    // still answers from the data it loaded first.
+    mockTime.counter = 1000000;
+
+    flag = store.getFlag('hello');
+    System.assertEquals(flag.version, 52);
+  }
+
+  @isTest
+  static void negativeTtlStillLoadsOnTheFirstLookup() {
+    CachingDataStore store = new CachingDataStore(-1, new GetTimeMock());
+
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(CachingDataStoreTest.payload1));
+
+    System.assertEquals(store.getFlag('hello').version, 52);
+    System.assertEquals(store.getSegment('hello').version, 50);
+    System.assertEquals(store.allFlags().size(), 1);
   }
 }

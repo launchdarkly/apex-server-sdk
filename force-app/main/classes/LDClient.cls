@@ -33,13 +33,20 @@ public class LDClient {
     this.getTime = new GetTimeImpl();
     String scopeKey = this.config.getScopeKey();
 
-    if (config.getCacheTtl() != null) {
-      this.store = new CachingDataStore(config.getCacheTtl(), this.getTime, scopeKey);
-    } else {
+    Integer cacheTtl = this.config.getCacheTtl();
+
+    // An unset or zero TTL means no caching, so every lookup reads the store. DataStore does
+    // that with one record per lookup, which is why both values select it. CachingDataStore
+    // also answers correctly with a zero TTL, because a zero-length cache is always expired
+    // and reloads, but it reads and parses every record to answer each lookup. A negative TTL
+    // caches indefinitely and stays with CachingDataStore.
+    if (cacheTtl == null || cacheTtl == 0) {
       this.store = new DataStore(scopeKey);
+    } else {
+      this.store = new CachingDataStore(cacheTtl, this.getTime, scopeKey);
     }
 
-    if (config.getBatchEvents()) {
+    if (this.config.getBatchEvents()) {
       this.eventSink = new BatchingEventSink(this.config.getMaxEventsInQueue(), scopeKey);
     } else {
       this.eventSink = new EventSink(this.config.getMaxEventsInQueue(), scopeKey);

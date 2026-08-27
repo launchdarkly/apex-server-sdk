@@ -55,6 +55,54 @@ private class LDClientTest {
     client.close();
   }
 
+  // A zero TTL means caching is off, not that flag data is unavailable. The flag below really
+  // evaluates to true, so the fallback is varied to tell a real evaluation apart from a
+  // fallback: if the store were unreadable, each call would return the fallback it was given.
+  @isTest
+  static void zeroCacheTtlReadsRealFlagData() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(true)));
+
+    LDConfig config = new LDConfig.Builder().setCacheTtl(0).build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+
+    System.assertEquals(true, client.boolVariation(user, 'hello', false));
+    System.assertEquals(true, client.boolVariation(user, 'hello', true));
+    System.assertEquals(1, client.allFlags(user).size());
+
+    // The fallback path still works for a key that is not in the store.
+    System.assertEquals(true, client.boolVariation(user, 'absent', true));
+    System.assertEquals(false, client.boolVariation(user, 'absent', false));
+  }
+
+  @isTest
+  static void negativeCacheTtlReadsRealFlagData() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(true)));
+
+    LDConfig config = new LDConfig.Builder().setCacheTtl(-1).build();
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(config);
+
+    System.assertEquals(true, client.boolVariation(user, 'hello', false));
+    System.assertEquals(true, client.boolVariation(user, 'hello', true));
+    System.assertEquals(1, client.allFlags(user).size());
+
+    System.assertEquals(true, client.boolVariation(user, 'absent', true));
+  }
+
+  @isTest
+  static void nullConfigUsesDefaults() {
+    DataStore store = new DataStore();
+    store.putAll((Map<String, Object>) JSON.deserializeUntyped(LDClientTest.rawStringBuilder(true)));
+
+    LDUser user = new LDUser.Builder('user-key').build();
+    LDClient client = new LDClient(null);
+
+    System.assertEquals(true, client.boolVariation(user, 'hello', false));
+  }
+
   @isTest
   static void basicVariationWithDetail() {
     DataStore store = new DataStore();

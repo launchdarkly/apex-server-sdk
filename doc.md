@@ -102,11 +102,25 @@ To prevent excessive querying, you can enable caching with `setCacheTtl`. This w
 
 If the cache is enabled, the SDK will instead load the entire data set from the store, only requerying for data every `cacheTtl` milliseconds. This can help reduce the number of queries made to the store, but it may also mean that the SDK is working with potentially stale data.
 
+Three kinds of value are accepted, matching the other LaunchDarkly server SDKs:
+
+| `ttl` | Behavior |
+| --- | --- |
+| unset or `0` | Caching is off. Every lookup reads a single record from the store, so the data is always current and each lookup costs one query. This is the default. |
+| positive | The SDK loads the whole data set and answers from it for that many milliseconds. |
+| negative | The SDK loads the whole data set once and never reads the store again. |
+
+A cache lives only as long as the Apex transaction that constructed the `LDClient`, because Apex
+keeps no state between transactions. A TTL therefore saves queries across the lookups within one
+transaction and nothing beyond it. If a transaction evaluates only one flag, caching costs more
+than it saves: the SDK reads and parses every record to answer what a single-record query would
+have answered.
+
 The cache setting also changes how a key that differs only by case resolves, which is one reason
 that behavior is undefined. Refer to "Key case sensitivity" above.
 
 ```java
-Builder setCacheTtl(Long ttl)
+Builder setCacheTtl(Integer ttl)
 ```
 
 #### `setMaxEventsInQueue`
