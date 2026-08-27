@@ -1,5 +1,59 @@
 # Apex Server-Side SDK API Documentation
 
+## Key case sensitivity
+
+LaunchDarkly treats flag, segment, and project keys as case sensitive. `MyFlag` and `myflag`
+are two different flags.
+
+**This SDK does not support case-sensitive keys, for flags, for segments, or for the scope keys
+you configure.**
+
+The cause is the platform. Salesforce compares text fields without regard to case, and it only
+allows a case-sensitive text field when that field is also unique. Neither field this SDK stores
+keys in can be unique: the same flag key appears in every LaunchDarkly project, and a scope key
+repeats on every one of its records. The SDK has no way to make the comparison exact.
+
+### What this means for you
+
+Choose keys that stay unique when case is ignored:
+
+- Within a LaunchDarkly project, do not create two flags, or two segments, whose keys differ
+  only by case.
+- Across the scope keys you configure, do not use two that differ only by case.
+
+Then match the case exactly everywhere a key is written: the key in LaunchDarkly, the key you
+pass to a variation method, the `LD_SCOPE_KEY` given to the bridge, and the value given to
+`setScopeKey`.
+
+**If you do use keys that differ only by case, which record the SDK resolves to is undefined.**
+A lookup can return either record. The answer can differ depending on whether you set a cache
+TTL, because the cache is an Apex map and Apex compares map keys with regard to case. It can
+change between releases without notice. Do not depend on it.
+
+A lookup whose case does not match any stored key may still resolve to a record today, for the
+same reason. That is not a supported fallback, and it is not something to build on.
+
+### What the SDK does guarantee
+
+Two things, both about data rather than about resolution:
+
+- A push for one scope never deletes the records of a scope whose key differs only by case. A
+  bridge started with `alpha` leaves everything belonging to `Alpha` in place.
+- A bridge never drains and deletes the queued events of a scope whose key differs only by
+  case, as long as that scope has events of its own.
+
+### What is not affected
+
+The SDK stores each key exactly as LaunchDarkly sends it, so stored data stays faithful even
+when a lookup does not. These parts of evaluation compare with regard to case:
+
+- Individual user targeting on a flag.
+- The `included` and `excluded` lists of a segment.
+- The clause operators, including `in`, `startsWith`, `endsWith`, `contains`, `matches`, and the
+  semantic version comparisons.
+- User attribute names. A custom attribute keeps its own case, even when its name matches a
+  built-in attribute after case is ignored.
+
 ## class LDConfig
 
 An immutable configuration object for `LDClient`. This class cannot be
@@ -14,6 +68,7 @@ Boolean getAllAttributesPrivate()
 Integer getMaxEventsInQueue()
 Integer getCacheTtl()
 Boolean getBatchEvents()
+String getScopeKey()
 ```
 
 ## class LDConfig.Builder
@@ -47,6 +102,9 @@ To prevent excessive querying, you can enable caching with `setCacheTtl`. This w
 
 If the cache is enabled, the SDK will instead load the entire data set from the store, only requerying for data every `cacheTtl` milliseconds. This can help reduce the number of queries made to the store, but it may also mean that the SDK is working with potentially stale data.
 
+The cache setting also changes how a key that differs only by case resolves, which is one reason
+that behavior is undefined. Refer to "Key case sensitivity" above.
+
 ```java
 Builder setCacheTtl(Long ttl)
 ```
@@ -72,6 +130,37 @@ If you are generating a large number of events in a short period of time, this c
 
 ```java
 Builder setBatchEvents(Boolean batchEvents)
+```
+
+#### `setScopeKey`
+
+Scopes this client within the Salesforce org, so that one org can hold flag data for more than
+one source of LaunchDarkly flags. The client reads, writes, and deletes only the records that
+carry the scope key you set here.
+
+**A scope is one environment of one project, not a project.** A bridge authenticates with an
+SDK key, and an SDK key is scoped to a single LaunchDarkly environment. The scope key must
+therefore be unique for every project and environment pair that shares the org. Do not set it
+to your LaunchDarkly project key: two environments of the same project would then share a
+scope, and each bridge's push would delete the other's flag data on every poll. Combining both
+names, as in `myproject-production`, is the simplest value that stays unique.
+
+The bridge must be configured with the same key, through its `LD_SCOPE_KEY` variable. A
+mismatch produces no error. Evaluation finds no flag data and every variation call returns
+its fallback.
+
+If `scopeKey` is `null` or an empty string, the client is scoped to the records that carry no
+scope. This is the default, and it is how the SDK behaved before this option existed.
+
+The setter trims the key and treats a blank key as an absent one, which matches the way the
+bridge handles the key it sends. It does not change the letter case, because LaunchDarkly keys
+are case sensitive.
+
+Scope keys that differ only by case are not supported. Refer to "Key case sensitivity"
+above.
+
+```java
+Builder setScopeKey(String scopeKey)
 ```
 
 ### Other methods

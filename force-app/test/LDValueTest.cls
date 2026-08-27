@@ -100,4 +100,54 @@ private class LDValueTest {
     System.assertEquals(value.get('test'), null);
     System.assertEquals(value.get(1), null);
   }
+
+  @isTest
+  static void stringEqualityIsCaseSensitive() {
+    String other = 'Hello';
+    LDValue value = LDValue.of('hello');
+
+    System.assertEquals(value.equals(LDValue.of('hello')), true);
+    System.assertEquals(value.equals(LDValue.of('Hello')), false);
+    System.assertEquals(value.equals(LDValue.of('HELLO')), false);
+    System.assertEquals(LDValue.of('HELLO').equals(value), false);
+    System.assertEquals(value.equals(LDValue.ofGeneric(other)), false);
+  }
+
+  @isTest
+  static void arrayEqualityIsCaseSensitive() {
+    LDValue value = new LDValueArray.Builder().add(LDValue.of('bob')).build();
+
+    System.assertEquals(value.equals(new LDValueArray.Builder().add(LDValue.of('bob')).build()), true);
+    System.assertEquals(value.equals(new LDValueArray.Builder().add(LDValue.of('Bob')).build()), false);
+    System.assertEquals(new LDValueArray.Builder().add(LDValue.of('Bob')).build().equals(value), false);
+  }
+
+  @isTest
+  static void objectEqualityIsCaseSensitive() {
+    LDValue value = new LDValueObject.Builder().set('email', LDValue.of('bob')).build();
+
+    System.assertEquals(value.equals(new LDValueObject.Builder().set('email', LDValue.of('bob')).build()), true);
+    System.assertEquals(value.equals(new LDValueObject.Builder().set('email', LDValue.of('Bob')).build()), false);
+    System.assertEquals(value.equals(new LDValueObject.Builder().set('EMAIL', LDValue.of('bob')).build()), false);
+  }
+
+  @isTest
+  static void nestedEqualityIsCaseSensitive() {
+    LDValue lower = new LDValueArray.Builder().add(LDValue.of('bob')).build();
+    LDValue sameCase = new LDValueArray.Builder().add(LDValue.of('bob')).build();
+    LDValue upper = new LDValueArray.Builder().add(LDValue.of('Bob')).build();
+    LDValue outerLower = new LDValueObject.Builder().set('names', lower).build();
+    LDValue outerSameCase = new LDValueObject.Builder().set('names', sameCase).build();
+    LDValue outerUpper = new LDValueObject.Builder().set('names', upper).build();
+
+    System.assertEquals(outerLower.equals(outerSameCase), true);
+    System.assertEquals(outerLower.equals(outerUpper), false);
+    System.assertEquals(outerUpper.equals(outerLower), false);
+  }
+
+  @isTest
+  static void genericNullHasNoValue() {
+    System.assertEquals(LDValue.ofGeneric(null), null);
+    System.assertEquals(LDValue.of((String) null), null);
+  }
 }

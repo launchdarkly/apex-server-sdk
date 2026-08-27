@@ -76,6 +76,11 @@ const (
 	//
 	// See: sdk-specs / SCMP-server-connection-minutes-polling (section 1.1).
 	INSTANCE_ID_HEADER = "X-LaunchDarkly-Instance-Id"
+	// SCOPE_HEADER names the LaunchDarkly scope on Salesforce-bound requests, so the
+	// org can scope stored flag data and queued events to one of them. It is sent only
+	// when LD_SCOPE_KEY is configured, which keeps a bridge that has not opted in
+	// indistinguishable from one running an older version.
+	SCOPE_HEADER = "LD-Scope-Key"
 )
 
 type Bridge struct {
@@ -97,6 +102,12 @@ type Bridge struct {
 	// LaunchDarkly-bound request (see INSTANCE_ID_HEADER) so the platform can estimate
 	// server-connection-minutes for polling clients.
 	instanceID string
+	// scopeKey scopes this bridge's records within the Salesforce org. A scope is one
+	// environment of one project, because LD_SDK_KEY names a single environment, so each
+	// project and environment pair sharing an org needs its own value here. Empty means
+	// unscoped, matching records that carry no scope. It must agree with the scope key
+	// configured on the Apex side or evaluation finds no flag data.
+	scopeKey string
 	// eventPollInterval is how long eventLoop waits between drains of EventData__c,
 	// and flagPollInterval is how long featureLoop waits between flag polls. Both
 	// default to DEFAULT_POLL_INTERVAL and are configurable per loop.
@@ -326,6 +337,19 @@ func newBridge() (*Bridge, error) {
 		Timeout: httpTimeoutDuration,
 	}
 
+	// Optional. Unset means this bridge owns the records that carry no scope, which is
+	// both the behavior from before scoping and the state an existing deployment upgrades
+	// into without changing anything. Logged either way, because a mismatch against the
+	// Apex-side scope key produces no error -- evaluation simply finds no flag data and
+	// every variation returns its fallback.
+	bridge.scopeKey = strings.TrimSpace(os.Getenv("LD_SCOPE_KEY"))
+	if bridge.scopeKey == "" {
+		log.Print("LD_SCOPE_KEY is not set, scoping to records with no scope")
+	} else {
+		log.Printf("LD_SCOPE_KEY is %q; the Apex client must be configured with the same value",
+			bridge.scopeKey)
+	}
+
 	context, cancel := context.WithCancel(context.Background())
 	bridge.context = context
 	bridge.cancel = cancel
@@ -469,6 +493,14 @@ func (bridge *Bridge) requestWithOauth(request *http.Request) (*http.Response, e
 	bridge.lock.Unlock()
 
 	request.Header.Set("Authorization", "Bearer "+token)
+
+	// Every Salesforce-bound request goes through this function, so the scope is stamped
+	// here rather than at each call site. When unset the header is omitted entirely, so the
+	// request is indistinguishable from one sent by a bridge predating scope
+	// support -- which is what makes either upgrade order safe.
+	if bridge.scopeKey != "" {
+		request.Header.Set(SCOPE_HEADER, bridge.scopeKey)
+	}
 
 	response, err := bridge.client.Do(request)
 	if err != nil {

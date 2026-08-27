@@ -113,7 +113,7 @@ public abstract class LDValue {
     return false;
   }
 
-  public Boolean equals(LDValue other) {
+  public virtual Boolean equals(LDValue other) {
     if (this.getType() == other.getType()) {
       return this.toGeneric() == other.toGeneric();
     } else {

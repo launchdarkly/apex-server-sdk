@@ -28,4 +28,10 @@ public class LDValueString extends LDValue {
   public override Boolean isString() {
     return true;
   }
+
+  // The Apex == operator ignores letter case for Strings. String.equals compares
+  // the exact characters. LaunchDarkly compares string values with case sensitivity.
+  public override Boolean equals(LDValue other) {
+    return other.getType() == LDValueType.CSTRING && this.value.equals(other.stringValue());
+  }
 }

@@ -31,16 +31,18 @@ public class LDClient {
     }
 
     this.getTime = new GetTimeImpl();
+    String scopeKey = this.config.getScopeKey();
+
     if (config.getCacheTtl() != null) {
-      this.store = new CachingDataStore(config.getCacheTtl(), this.getTime);
+      this.store = new CachingDataStore(config.getCacheTtl(), this.getTime, scopeKey);
     } else {
-      this.store = new DataStore();
+      this.store = new DataStore(scopeKey);
     }
 
     if (config.getBatchEvents()) {
-      this.eventSink = new BatchingEventSink(this.config.getMaxEventsInQueue());
+      this.eventSink = new BatchingEventSink(this.config.getMaxEventsInQueue(), scopeKey);
     } else {
-      this.eventSink = new EventSink(this.config.getMaxEventsInQueue());
+      this.eventSink = new EventSink(this.config.getMaxEventsInQueue(), scopeKey);
     }
 
     this.evaluator = new Evaluator(this.store, this.getTime);

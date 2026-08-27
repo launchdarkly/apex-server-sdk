@@ -6,6 +6,12 @@
 
 Download a release archive from the [GitHub Releases](https://github.com/launchdarkly/apex-server-sdk/releases) for use in your project. Refer to the [SDK documentation](https://docs.launchdarkly.com/sdk/server-side/apex#getting-started) for complete instructions on getting started with using the SDK.
 
+## Case sensitivity
+
+Keys that differ only by letter case are not supported, for flags, for segments, or for
+scope keys. Match the case of every key exactly as it appears in LaunchDarkly. Refer to "Key case
+sensitivity" in the [API documentation](doc.md) for what the SDK does and does not guarantee.
+
 ## Learn more
 
 Read our [documentation](https://docs.launchdarkly.com) for in-depth instructions on configuring and using LaunchDarkly. You can also head straight to the [complete reference guide for this SDK](https://docs.launchdarkly.com/sdk/server-side/apex).
