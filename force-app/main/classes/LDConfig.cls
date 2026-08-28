@@ -74,6 +74,17 @@ public class LDConfig {
       return this;
     }
 
+    // How long the SDK keeps flag and segment data before it reads the store again, in
+    // milliseconds. Three values are meaningful, and they match the other LaunchDarkly server
+    // SDKs:
+    //
+    //   null or 0  Caching is off. Each lookup reads one record from the store, so the data is
+    //              always current and the cost is one query per lookup. This is the default.
+    //   positive   The SDK loads the whole data set and reuses it for this many milliseconds.
+    //   negative   The SDK loads the whole data set once and never reads the store again.
+    //
+    // A cache lives only as long as the Apex transaction that built the client, so a TTL saves
+    // queries across the lookups in one transaction and nothing more.
     public Builder setCacheTtl(Integer ttl) {
       this.ttl = ttl;
       return this;

@@ -4,7 +4,16 @@ public class CachingDataStore implements DataStoreInterface {
 
   private GetTimeInterface getTime;
 
+  // How long a loaded cache stays valid, in milliseconds. Zero expires the cache at once, so
+  // every lookup reloads it. A negative value caches indefinitely.
+  //
+  // LDClient sends a zero TTL to DataStore instead of here, because reloading the whole data
+  // set to answer one lookup is the most expensive way to do it. This class still honors zero,
+  // so its behavior follows from the TTL alone.
   private final Integer ttl;
+
+  // When the cache was last loaded, or null while it has never been loaded. Both freshness
+  // tests need a loaded cache, so this doubles as the "cache is populated" flag.
   private Long cachedAt;
 
   // Refer to the note in DataStore: bound here, not per call, so Evaluator's prerequisite
@@ -28,11 +37,11 @@ public class CachingDataStore implements DataStoreInterface {
 
   private void loadCache() {
     Long now = this.getTime.now();
-    if (this.cachedAt != null && this.cachedAt + this.ttl > now) {
-      return;
-    }
 
-    if (this.ttl == 0) {
+    // A negative TTL keeps a loaded cache forever. A positive TTL keeps it until it is older
+    // than the TTL. A zero TTL is already expired, so every lookup falls through and reloads.
+    // No test can pass before the first load, so the first call always reads the store.
+    if (this.cachedAt != null && (this.ttl < 0 || this.cachedAt + this.ttl > now)) {
       return;
     }
 
