@@ -70,6 +70,13 @@ const (
 	// hours, and a 5s drain spends roughly 17,280 of them, about 17%. Below that the
 	// curve steepens fast: 2s is around 43% and 1s around 86% of the same allocation.
 	EVENT_POLL_INTERVAL_WARN_THRESHOLD = 5 * time.Second
+	// EVENT_PUSH_RETRY_DELAY is how long eventLoop waits between the two attempts it
+	// makes at pushing a batch of events to LaunchDarkly. It matches the delay the
+	// other LaunchDarkly server SDKs use between the same two attempts.
+	//
+	// It seeds a Bridge field rather than being read where the push happens, so tests
+	// can shorten it. Nothing else changes it, and no environment variable exposes it.
+	EVENT_PUSH_RETRY_DELAY = 1 * time.Second
 	// INSTANCE_ID_HEADER is the HTTP header used to identify this bridge instance for
 	// estimating server-connection-minutes when polling LaunchDarkly. Its value is a
 	// v4 UUID generated once per bridge process and constant for that process's lifetime.
@@ -113,9 +120,12 @@ type Bridge struct {
 	// default to DEFAULT_POLL_INTERVAL and are configurable per loop.
 	eventPollInterval time.Duration
 	flagPollInterval  time.Duration
-	lock              sync.Mutex
-	context           context.Context
-	cancel            context.CancelFunc
+	// eventPushRetryDelay is how long eventLoop waits before it retries an event
+	// push. It always holds EVENT_PUSH_RETRY_DELAY outside of tests.
+	eventPushRetryDelay time.Duration
+	lock                sync.Mutex
+	context             context.Context
+	cancel              context.CancelFunc
 }
 
 func parseDurationFromEnv(name string, fallback time.Duration) time.Duration {
@@ -332,6 +342,8 @@ func newBridge() (*Bridge, error) {
 		log.Printf("%s duration (%s) is less than the minimum of %s, using %s", "FLAG_POLL_INTERVAL", bridge.flagPollInterval, MIN_FLAG_POLL_INTERVAL, MIN_FLAG_POLL_INTERVAL)
 		bridge.flagPollInterval = MIN_FLAG_POLL_INTERVAL
 	}
+
+	bridge.eventPushRetryDelay = EVENT_PUSH_RETRY_DELAY
 
 	bridge.client = http.Client{
 		Timeout: httpTimeoutDuration,
@@ -556,36 +568,83 @@ func (bridge *Bridge) eventLoop() error {
 				goto End
 			}
 
-			pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewBuffer(pollBytes))
-			if err != nil {
-				return errors.New("failed constructing event push request")
-			}
+			// The push gets two attempts a second apart, which is what the other
+			// LaunchDarkly server SDKs give it. Most push failures are transient -- a
+			// dropped connection, a rate limit, one unhealthy node answering 503 -- and
+			// a second attempt clears them inside this cycle rather than after a whole
+			// poll interval.
+			//
+			// Two attempts is the entire budget, and it does not make delivery durable.
+			// Salesforce deletes the events as it hands them over, so a batch that fails
+			// both attempts is gone. The retry only makes that outcome less frequent.
+			pushed := false
+			for attempt := 0; attempt < 2; attempt++ {
+				if attempt > 0 {
+					log.Print("retrying the event push in: ", bridge.eventPushRetryDelay)
 
-			pushRequest.Header.Set("Content-Type", "application/json")
-			pushRequest.Header.Set("X-LaunchDarkly-Event-Schema", "3")
-			pushRequest.Header.Set("Authorization", bridge.launchDarklyKey)
-			pushRequest.Header.Set("User-Agent", USER_AGENT)
-			// Sent on every LaunchDarkly-bound request (matches the reference Go SDK,
-			// where DefaultHeaders carries the instance id across poll/stream/events).
-			pushRequest.Header.Set(INSTANCE_ID_HEADER, bridge.instanceID)
+					// The delay watches the context as well as the clock, so a shutdown
+					// during it stops the daemon at once instead of after the delay.
+					// Shutdown abandons the retry rather than making one more attempt:
+					// the process is on its way out.
+					select {
+					case <-bridge.context.Done():
+						return nil
+					case <-time.After(bridge.eventPushRetryDelay):
+					}
+				}
 
-			log.Print("pushing events to: " + pushURI)
+				// Each attempt builds its own request. client.Do reads the body to the
+				// end, so sending one request twice would send the events once and an
+				// empty body after that.
+				pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewReader(pollBytes))
+				if err != nil {
+					return errors.New("failed constructing event push request")
+				}
 
-			pushResponse, err := bridge.client.Do(pushRequest)
-			if err != nil {
-				log.Print("failed pushing events to LaunchDarkly")
-				goto End
-			}
-			// Only the status matters here, so the body is discarded rather than read.
-			drainAndClose(pushResponse)
+				pushRequest.Header.Set("Content-Type", "application/json")
+				pushRequest.Header.Set("X-LaunchDarkly-Event-Schema", "3")
+				pushRequest.Header.Set("Authorization", bridge.launchDarklyKey)
+				pushRequest.Header.Set("User-Agent", USER_AGENT)
+				// Sent on every LaunchDarkly-bound request (matches the reference Go SDK,
+				// where DefaultHeaders carries the instance id across poll/stream/events).
+				pushRequest.Header.Set(INSTANCE_ID_HEADER, bridge.instanceID)
 
-			if pushResponse.StatusCode == 401 || pushResponse.StatusCode == 403 {
-				return errors.New("Pushing events to LaunchDarkly unauthorized")
-			}
+				log.Print("pushing events to: " + pushURI)
 
-			if pushResponse.StatusCode != 200 && pushResponse.StatusCode != 202 {
+				pushResponse, err := bridge.client.Do(pushRequest)
+				if err != nil {
+					log.Print("failed pushing events to LaunchDarkly: ", err)
+					continue
+				}
+				// Only the status matters here, so the body is discarded rather than read.
+				drainAndClose(pushResponse)
+
+				// A retry cannot make a rejected SDK key acceptable, so an attempt spent
+				// on one is wasted. The daemon stops instead, because the same key
+				// authorizes every other LaunchDarkly request it makes.
+				if pushResponse.StatusCode == 401 || pushResponse.StatusCode == 403 {
+					return errors.New("Pushing events to LaunchDarkly unauthorized")
+				}
+
+				if pushResponse.StatusCode == 200 || pushResponse.StatusCode == 202 {
+					pushed = true
+					break
+				}
+
 				log.Print("event push expected 200/202 got: ", pushResponse.StatusCode)
-				goto End
+
+				// A status that reports something wrong with the request gets no retry.
+				// The next attempt would send the same bytes to the same place.
+				if !isHTTPErrorRecoverable(pushResponse.StatusCode) {
+					break
+				}
+			}
+
+			if !pushed {
+				// This batch reaches nobody, so the log says so. Salesforce deleted
+				// the events as it handed them over, and no later cycle sends them
+				// again.
+				log.Print("gave up pushing events to LaunchDarkly, this batch is lost")
 			}
 		}
 
@@ -598,6 +657,31 @@ func (bridge *Bridge) eventLoop() error {
 		case <-time.After(bridge.eventPollInterval):
 		}
 	}
+}
+
+// isHTTPErrorRecoverable reports whether an HTTP error status might answer
+// differently if the same request is sent again. It matches the function of the same
+// name in go-sdk-events, so the bridge gives up on the statuses the other
+// LaunchDarkly server SDKs give up on.
+//
+// Among the 4xx statuses only 400, 408 and 429 are recoverable. A request timeout and
+// a rate limit both clear on their own, and LaunchDarkly's SDKs treat 400 as
+// recoverable as well. Every other 4xx reports something wrong with the request
+// itself, which repeating it verbatim cannot change.
+//
+// Everything outside 4xx is recoverable. That covers 5xx and any status the service
+// has not returned before, so an unexpected one costs a retry rather than a batch.
+func isHTTPErrorRecoverable(statusCode int) bool {
+	if statusCode >= 400 && statusCode < 500 {
+		switch statusCode {
+		case 400, 408, 429:
+			return true
+		default:
+			return false
+		}
+	}
+
+	return true
 }
 
 func (bridge *Bridge) featureLoop() error {
