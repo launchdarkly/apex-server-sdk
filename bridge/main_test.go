@@ -49,8 +49,12 @@ func newTestBridge(t *testing.T, baseURI, eventsURI string) *Bridge {
 		// and let select pick the timer branch instead, causing extra polls.
 		eventPollInterval: DEFAULT_POLL_INTERVAL,
 		flagPollInterval:  DEFAULT_POLL_INTERVAL,
-		context:           ctx,
-		cancel:            cancel,
+		// Brief but positive, for the same reason as the intervals above. Tests that
+		// exercise the retry itself set their own value; this one only keeps a test
+		// that reaches the retry incidentally from waiting a real second.
+		eventPushRetryDelay: time.Millisecond,
+		context:             ctx,
+		cancel:              cancel,
 	}
 }
 
