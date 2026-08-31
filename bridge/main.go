@@ -535,7 +535,27 @@ func drainAndClose(response *http.Response) {
 	_ = response.Body.Close()
 }
 
-func (bridge *Bridge) requestWithOauth(request *http.Request) (*http.Response, error, bool) {
+// sendWithToken stamps the current OAuth token on a request and sends it.
+//
+// It is a separate function because requestWithOauth can send the same request twice,
+// and everything here has to happen again on the second attempt. The token is re-read
+// from the bridge each time, so a second attempt carries what authorizeSalesforce just
+// stored rather than the value that was refused.
+//
+// The body is replayed from GetBody, because the transport consumes and closes it while
+// writing the request. Leaving that out fails intermittently rather than consistently,
+// which is worse than failing outright: the transport sees a request that declared a
+// ContentLength and then wrote no body, and if the attempt went out on a pooled connection
+// it rewinds through GetBody and retries itself, so the bug stays invisible. That cover
+// disappears as soon as the retry has to dial -- because the org closed the connection, or
+// the pool reaped it while idle -- and the send fails with "ContentLength=N with Body
+// length 0" instead.
+//
+// http.NewRequest supplies a GetBody for every body the bridge builds, and leaves it nil
+// when the request carries no body at all, which is the case for both poll requests.
+// Replaying on the first attempt swaps an unread body for an equivalent unread body, so
+// the rule can live here, at the send, rather than only on the path that needs it.
+func (bridge *Bridge) sendWithToken(request *http.Request) (*http.Response, error) {
 	bridge.lock.Lock()
 	token := bridge.oauthCurrentToken
 	bridge.lock.Unlock()
@@ -550,16 +570,58 @@ func (bridge *Bridge) requestWithOauth(request *http.Request) (*http.Response, e
 		request.Header.Set(SCOPE_HEADER, bridge.scopeKey)
 	}
 
-	response, err := bridge.client.Do(request)
+	if request.GetBody != nil {
+		body, err := request.GetBody()
+		if err != nil {
+			return nil, err
+		}
+		request.Body = body
+	}
+
+	return bridge.client.Do(request)
+}
+
+// requestWithOauth sends a Salesforce-bound request, and on a rejected token refreshes
+// it and sends the request a second time.
+//
+// The second attempt is what makes a token expiry cheap. Salesforce ends a session on
+// its own schedule, so the bridge only learns its token is dead by having a request
+// refused. Refreshing alone leaves the new token unused until the next cycle, and the
+// caller has already treated this one as failed -- so a routine expiry costs a whole
+// poll interval of stale flag data or undelivered events. Sending again costs one round
+// trip instead.
+//
+// One retry, never more. A token minted seconds ago being refused is not an expiry, so
+// refreshing again cannot change the answer: it means the connected app's permissions or
+// its run-as identity changed. That response is handed back as it stands, so the loop logs it
+// and waits, instead of spending the org's API allocation on a rejection that repeats.
+//
+// The caller owns the returned response and must finish with it. Every response this
+// function does not return is drained and closed here, so nothing keeps holding a
+// connection and nothing is closed twice.
+func (bridge *Bridge) requestWithOauth(request *http.Request) (*http.Response, error, bool) {
+	response, err := bridge.sendWithToken(request)
 	if err != nil {
 		return nil, err, false
 	}
 
-	if response.StatusCode == 401 || response.StatusCode == 403 {
-		err, permanent := bridge.authorizeSalesforce()
-		if err != nil {
-			return nil, err, permanent
-		}
+	if response.StatusCode != 401 && response.StatusCode != 403 {
+		return response, nil, false
+	}
+
+	// No path below returns this response or reads its body, so finish with it here.
+	// Draining before authorizing also returns the connection to the pool in time for the
+	// token request to reuse it.
+	drainAndClose(response)
+
+	err, permanent := bridge.authorizeSalesforce()
+	if err != nil {
+		return nil, err, permanent
+	}
+
+	response, err = bridge.sendWithToken(request)
+	if err != nil {
+		return nil, err, false
 	}
 
 	return response, nil, false
@@ -812,7 +874,13 @@ func (bridge *Bridge) featureLoop() error {
 			}
 
 			pushURI := bridge.salesforceURL + "store"
-			pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewBuffer(pollBytes))
+			// A bytes.Reader rather than a bytes.Buffer, because requestWithOauth can send
+			// this request a second time after refreshing the token. Both give
+			// http.NewRequest enough to build a GetBody, so both replay as the code stands,
+			// but only the Reader is a read-only view of pollBytes. A Buffer is a writable
+			// staging area that http.NewRequest snapshots once, so a later write to it would
+			// leave the two attempts sending different bytes.
+			pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewReader(pollBytes))
 			if err != nil {
 				log.Print("failed constructing flag push request ", err)
 				return errors.New("Failed constructiong flag push request")
