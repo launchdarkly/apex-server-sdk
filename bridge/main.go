@@ -616,7 +616,7 @@ func (bridge *Bridge) eventLoop() error {
 				// empty body after that.
 				pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewReader(pollBytes))
 				if err != nil {
-					return errors.New("failed constructing event push request")
+					return err
 				}
 
 				pushRequest.Header.Set("Content-Type", "application/json")
