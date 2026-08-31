@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -469,7 +470,11 @@ func (bridge *Bridge) authorizeSalesforce() (error, bool) {
 	if authResponse.StatusCode != 200 {
 		log.Print("Salesforce auth failure: ", authResponse.StatusCode, string(errorBody), readErr)
 		if readErr != nil {
-			return readErr, false
+			// Wrapped rather than returned bare, so the status code reaches the
+			// operator on this path as well. The caller only logs this error, and
+			// "unexpected EOF" on its own does not say what failed.
+			return fmt.Errorf("Salesforce auth failure, status %d, response body read failed: %w",
+				authResponse.StatusCode, readErr), false
 		}
 		return errors.New("Salesforce auth failure, status " +
 			strconv.Itoa(authResponse.StatusCode) + ": " + string(errorBody)), false
