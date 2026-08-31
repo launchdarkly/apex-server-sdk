@@ -882,8 +882,12 @@ func (bridge *Bridge) featureLoop() error {
 			// leave the two attempts sending different bytes.
 			pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewReader(pollBytes))
 			if err != nil {
-				log.Print("failed constructing flag push request ", err)
-				return errors.New("Failed constructiong flag push request")
+				// Logged as well as returned, which is not redundant. run() reads one
+				// error from each loop and returns only the first to arrive, so an
+				// error from here reaches the operator only when this loop loses that
+				// race. The log line does not depend on the race.
+				log.Print("failed constructing flag push request: ", err)
+				return err
 			}
 			pushRequest.Header.Set("Content-Type", "application/json")
 
@@ -894,7 +898,7 @@ func (bridge *Bridge) featureLoop() error {
 			}
 			if err != nil {
 				etag = ""
-				log.Print("failed pushings flags to salesforce: ", err)
+				log.Print("failed pushing flags to salesforce: ", err)
 				goto End
 			}
 			// Only the status matters here, so the body is discarded rather than read.
