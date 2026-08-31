@@ -407,3 +407,94 @@ func TestIsHTTPErrorRecoverable(t *testing.T) {
 		}
 	}
 }
+
+// TestPushDisposition pins the three outcomes a failed push attempt can report. A log
+// line that does not distinguish a first failure from a final one leaves an operator
+// unable to tell a transient blip from lost data, which is the whole reason the
+// annotation exists.
+//
+// The "this batch is lost" substring is load-bearing beyond the wording:
+// TestEventPushRetriesRecoverableFailures decides wantGaveUp by searching for it, so
+// both give-up outcomes must carry it and the retry outcome must not.
+func TestPushDisposition(t *testing.T) {
+	tests := []struct {
+		name        string
+		attempt     int
+		recoverable bool
+		want        string
+	}{
+		{
+			name:        "a recoverable failure with an attempt left retries",
+			attempt:     0,
+			recoverable: true,
+			want:        "will retry",
+		},
+		{
+			name:        "a recoverable failure on the last attempt gives up",
+			attempt:     EVENT_PUSH_ATTEMPTS - 1,
+			recoverable: true,
+			want:        "out of attempts, this batch is lost",
+		},
+		{
+			// The status decides this one, not the budget, so it reads the same on
+			// either attempt. Spending the second attempt would resend identical
+			// bytes to the same endpoint.
+			name:        "an unrecoverable failure gives up with an attempt left",
+			attempt:     0,
+			recoverable: false,
+			want:        "not retryable, this batch is lost",
+		},
+		{
+			name:        "an unrecoverable failure gives up on the last attempt",
+			attempt:     EVENT_PUSH_ATTEMPTS - 1,
+			recoverable: false,
+			want:        "not retryable, this batch is lost",
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			got := pushDisposition(test.attempt, test.recoverable)
+			if got != test.want {
+				t.Errorf("pushDisposition(%d, %v) = %q, want %q",
+					test.attempt, test.recoverable, got, test.want)
+			}
+
+			lost := strings.Contains(got, "this batch is lost")
+			if wantLost := test.want != "will retry"; lost != wantLost {
+				t.Errorf("pushDisposition(%d, %v) = %q, reports a lost batch = %v, want %v",
+					test.attempt, test.recoverable, got, lost, wantLost)
+			}
+		})
+	}
+}
+
+// TestEventPushAnnotatesTheFirstFailure drives the annotation through eventLoop rather
+// than calling pushDisposition directly, so it also proves the loop passes the live
+// attempt index. A 503 then a 200 means the first failure has a retry behind it, so the
+// log has to say so and must not claim the batch was lost -- it was delivered.
+func TestEventPushAnnotatesTheFirstFailure(t *testing.T) {
+	logged := captureLog(t)
+
+	pushURI, attempts := eventPushServer(t, http.StatusServiceUnavailable, http.StatusOK)
+
+	bridge := newEventPushBridge(t, pushURI)
+	salesforceOneBatch(t, bridge, eventBatch)
+
+	if _, err := runEventLoop(t, bridge, eventLoopReturnLimit); err != nil {
+		t.Fatalf("eventLoop returned unexpected error: %v", err)
+	}
+
+	if got := len(attempts()); got != 2 {
+		t.Fatalf("the push was attempted %d times, want 2\nlog:\n%s", got, logged.String())
+	}
+
+	if !strings.Contains(logged.String(), "will retry") {
+		t.Errorf("the first failure did not report that a retry follows\nlog:\n%s", logged.String())
+	}
+
+	if strings.Contains(logged.String(), "this batch is lost") {
+		t.Errorf("a delivered batch was reported as lost\nlog:\n%s", logged.String())
+	}
+}

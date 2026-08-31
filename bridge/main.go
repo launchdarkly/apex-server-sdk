@@ -77,6 +77,10 @@ const (
 	// It seeds a Bridge field rather than being read where the push happens, so tests
 	// can shorten it. Nothing else changes it, and no environment variable exposes it.
 	EVENT_PUSH_RETRY_DELAY = 1 * time.Second
+	// EVENT_PUSH_ATTEMPTS is how many times eventLoop sends one batch of events before
+	// it abandons them. Two means the original attempt and one retry, matching the
+	// other LaunchDarkly server SDKs.
+	EVENT_PUSH_ATTEMPTS = 2
 	// INSTANCE_ID_HEADER is the HTTP header used to identify this bridge instance for
 	// estimating server-connection-minutes when polling LaunchDarkly. Its value is a
 	// v4 UUID generated once per bridge process and constant for that process's lifetime.
@@ -577,8 +581,7 @@ func (bridge *Bridge) eventLoop() error {
 			// Two attempts is the entire budget, and it does not make delivery durable.
 			// Salesforce deletes the events as it hands them over, so a batch that fails
 			// both attempts is gone. The retry only makes that outcome less frequent.
-			pushed := false
-			for attempt := 0; attempt < 2; attempt++ {
+			for attempt := 0; attempt < EVENT_PUSH_ATTEMPTS; attempt++ {
 				if attempt > 0 {
 					log.Print("retrying the event push in: ", bridge.eventPushRetryDelay)
 
@@ -613,7 +616,11 @@ func (bridge *Bridge) eventLoop() error {
 
 				pushResponse, err := bridge.client.Do(pushRequest)
 				if err != nil {
-					log.Print("failed pushing events to LaunchDarkly: ", err)
+					// A failure below the HTTP layer says nothing about the request, so
+					// another attempt is always worth making. Only the attempt budget
+					// decides the outcome here.
+					log.Print("failed pushing events to LaunchDarkly: ", err,
+						", ", pushDisposition(attempt, true))
 					continue
 				}
 				// Only the status matters here, so the body is discarded rather than read.
@@ -627,24 +634,19 @@ func (bridge *Bridge) eventLoop() error {
 				}
 
 				if pushResponse.StatusCode == 200 || pushResponse.StatusCode == 202 {
-					pushed = true
 					break
 				}
 
-				log.Print("event push expected 200/202 got: ", pushResponse.StatusCode)
+				recoverable := isHTTPErrorRecoverable(pushResponse.StatusCode)
+
+				log.Print("event push expected 200/202 got: ", pushResponse.StatusCode,
+					", ", pushDisposition(attempt, recoverable))
 
 				// A status that reports something wrong with the request gets no retry.
 				// The next attempt would send the same bytes to the same place.
-				if !isHTTPErrorRecoverable(pushResponse.StatusCode) {
+				if !recoverable {
 					break
 				}
-			}
-
-			if !pushed {
-				// This batch reaches nobody, so the log says so. Salesforce deleted
-				// the events as it handed them over, and no later cycle sends them
-				// again.
-				log.Print("gave up pushing events to LaunchDarkly, this batch is lost")
 			}
 		}
 
@@ -657,6 +659,26 @@ func (bridge *Bridge) eventLoop() error {
 		case <-time.After(bridge.eventPollInterval):
 		}
 	}
+}
+
+// pushDisposition says what becomes of a batch after a failed push attempt, so every
+// failure the bridge logs also reports whether the events still have a chance. The
+// other LaunchDarkly SDKs annotate their event push failures the same way, and without
+// it a reader cannot tell a first failure from a final one -- the two lines are
+// otherwise identical.
+//
+// A lost batch is named as lost, because nothing sends it again. Salesforce deleted the
+// events as it handed them over, so no later cycle retries them.
+func pushDisposition(attempt int, recoverable bool) string {
+	if !recoverable {
+		return "not retryable, this batch is lost"
+	}
+
+	if attempt < EVENT_PUSH_ATTEMPTS-1 {
+		return "will retry"
+	}
+
+	return "out of attempts, this batch is lost"
 }
 
 // isHTTPErrorRecoverable reports whether an HTTP error status might answer
