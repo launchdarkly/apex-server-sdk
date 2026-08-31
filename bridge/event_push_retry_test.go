@@ -427,13 +427,13 @@ func TestPushDisposition(t *testing.T) {
 	}{
 		{
 			name:        "a recoverable failure with an attempt left retries",
-			attempt:     0,
+			attempt:     1,
 			recoverable: true,
 			want:        "will retry",
 		},
 		{
 			name:        "a recoverable failure on the last attempt gives up",
-			attempt:     EVENT_PUSH_ATTEMPTS - 1,
+			attempt:     MAX_EVENT_PUSH_ATTEMPTS,
 			recoverable: true,
 			want:        "out of attempts, this batch is lost",
 		},
@@ -442,13 +442,13 @@ func TestPushDisposition(t *testing.T) {
 			// either attempt. Spending the second attempt would resend identical
 			// bytes to the same endpoint.
 			name:        "an unrecoverable failure gives up with an attempt left",
-			attempt:     0,
+			attempt:     1,
 			recoverable: false,
 			want:        "not retryable, this batch is lost",
 		},
 		{
 			name:        "an unrecoverable failure gives up on the last attempt",
-			attempt:     EVENT_PUSH_ATTEMPTS - 1,
+			attempt:     MAX_EVENT_PUSH_ATTEMPTS,
 			recoverable: false,
 			want:        "not retryable, this batch is lost",
 		},

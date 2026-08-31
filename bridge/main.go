@@ -77,10 +77,10 @@ const (
 	// It seeds a Bridge field rather than being read where the push happens, so tests
 	// can shorten it. Nothing else changes it, and no environment variable exposes it.
 	EVENT_PUSH_RETRY_DELAY = 1 * time.Second
-	// EVENT_PUSH_ATTEMPTS is how many times eventLoop sends one batch of events before
-	// it abandons them. Two means the original attempt and one retry, matching the
-	// other LaunchDarkly server SDKs.
-	EVENT_PUSH_ATTEMPTS = 2
+	// MAX_EVENT_PUSH_ATTEMPTS is how many times eventLoop sends one batch of events
+	// before it abandons them. Two means the original attempt and one retry, matching
+	// the other LaunchDarkly server SDKs.
+	MAX_EVENT_PUSH_ATTEMPTS = 2
 	// INSTANCE_ID_HEADER is the HTTP header used to identify this bridge instance for
 	// estimating server-connection-minutes when polling LaunchDarkly. Its value is a
 	// v4 UUID generated once per bridge process and constant for that process's lifetime.
@@ -596,8 +596,8 @@ func (bridge *Bridge) eventLoop() error {
 			// double-counting. It mirrors the reference Go SDK's event sender.
 			payloadID := uuid.New().String()
 
-			for attempt := 0; attempt < EVENT_PUSH_ATTEMPTS; attempt++ {
-				if attempt > 0 {
+			for attempt := 1; attempt <= MAX_EVENT_PUSH_ATTEMPTS; attempt++ {
+				if attempt > 1 {
 					log.Print("retrying the event push in: ", bridge.eventPushRetryDelay)
 
 					// The delay watches the context as well as the clock, so a shutdown
@@ -685,12 +685,14 @@ func (bridge *Bridge) eventLoop() error {
 //
 // A lost batch is named as lost, because nothing sends it again. Salesforce deleted the
 // events as it handed them over, so no later cycle retries them.
+//
+// attempt counts from 1, matching the loop that calls this.
 func pushDisposition(attempt int, recoverable bool) string {
 	if !recoverable {
 		return "not retryable, this batch is lost"
 	}
 
-	if attempt < EVENT_PUSH_ATTEMPTS-1 {
+	if attempt < MAX_EVENT_PUSH_ATTEMPTS {
 		return "will retry"
 	}
 
