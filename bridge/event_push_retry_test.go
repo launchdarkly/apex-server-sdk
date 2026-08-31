@@ -52,7 +52,12 @@ func newEventPushBridge(t *testing.T, eventsURI string) *Bridge {
 	bridge := newTestBridge(t, "http://unused.invalid", eventsURI)
 	// Pre-seed an oauth token so requestWithOauth does not try to re-auth.
 	bridge.oauthCurrentToken = "test-token"
-	bridge.eventPollInterval = time.Millisecond
+	// The interval is deliberately much larger than the retry delay. The push runs on
+	// its own goroutine now, so a retry and the next drain are concurrent; at equal
+	// timescales a test races its own fixture, because the drain that cancels the bridge
+	// can land inside the retry delay and abandon it. Production has the same shape at
+	// 1s against 30s, so keeping the ratio is realistic as well as deterministic.
+	bridge.eventPollInterval = 50 * time.Millisecond
 	bridge.eventPushRetryDelay = time.Millisecond
 
 	return bridge
