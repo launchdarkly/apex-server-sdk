@@ -523,6 +523,10 @@ func (bridge *Bridge) eventLoop() error {
 
 	for {
 		pollRequest, err := http.NewRequest("GET", pollURI, nil)
+		if err != nil {
+			return err
+		}
+
 		pollRequest.Header.Set("Content-Type", "application/json")
 
 		log.Print("requesting events from: " + pollURI)
