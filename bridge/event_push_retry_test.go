@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // The event push to LaunchDarkly gets two attempts one delay apart, matching the event
@@ -496,5 +498,160 @@ func TestEventPushAnnotatesTheFirstFailure(t *testing.T) {
 
 	if strings.Contains(logged.String(), "this batch is lost") {
 		t.Errorf("a delivered batch was reported as lost\nlog:\n%s", logged.String())
+	}
+}
+
+// eventPushIDServer is eventPushServer with the payload id recorded instead of the body.
+// A separate stand-in rather than a wider return from that one, so the six tests already
+// built on it are left alone.
+func eventPushIDServer(t *testing.T, statuses ...int) (string, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	var ids []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = ioutil.ReadAll(r.Body)
+
+		mu.Lock()
+		attempt := len(ids)
+		ids = append(ids, r.Header.Get(PAYLOAD_ID_HEADER))
+		mu.Unlock()
+
+		status := http.StatusInternalServerError
+		if attempt < len(statuses) {
+			status = statuses[attempt]
+		}
+
+		if status == abortEventPush {
+			panic(http.ErrAbortHandler)
+		}
+
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(server.Close)
+
+	return server.URL, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return ids
+	}
+}
+
+// salesforceBatches is salesforceOneBatch for more than one batch. It hands over each
+// payload on its own drain, then cancels the bridge and reports an empty queue, so the
+// loop runs exactly one push cycle per payload.
+func salesforceBatches(t *testing.T, bridge *Bridge, payloads ...[]byte) {
+	t.Helper()
+
+	var mu sync.Mutex
+	drains := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		drain := drains
+		drains++
+		mu.Unlock()
+
+		if drain < len(payloads) {
+			_, _ = w.Write(payloads[drain])
+			return
+		}
+
+		bridge.cancel()
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(server.Close)
+
+	bridge.salesforceURL = server.URL + "/"
+}
+
+// TestEventPushRepeatsThePayloadIDOnARetry is the regression test for a retry that
+// double-counts events.
+//
+// The retry cannot distinguish an attempt nobody received from one LaunchDarkly accepted
+// whose response never arrived, so it sends again in both cases. LaunchDarkly
+// deduplicates on the payload id, which is what makes the second case safe -- provided
+// the retry repeats the id rather than minting a new one. A fresh id per attempt looks
+// like a second batch and the events are ingested twice.
+//
+// Asserting the two ids are equal is the point. A test that only checked the header was
+// present would pass against exactly the bug this guards.
+func TestEventPushRepeatsThePayloadIDOnARetry(t *testing.T) {
+	tests := []struct {
+		name     string
+		statuses []int
+	}{
+		{
+			name:     "a dropped connection",
+			statuses: []int{abortEventPush, http.StatusAccepted},
+		},
+		{
+			name:     "a recoverable status",
+			statuses: []int{http.StatusServiceUnavailable, http.StatusAccepted},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			logged := captureLog(t)
+
+			pushURI, ids := eventPushIDServer(t, test.statuses...)
+
+			bridge := newEventPushBridge(t, pushURI)
+			salesforceOneBatch(t, bridge, eventBatch)
+
+			if _, err := runEventLoop(t, bridge, eventLoopReturnLimit); err != nil {
+				t.Fatalf("eventLoop returned unexpected error: %v", err)
+			}
+
+			got := ids()
+			if len(got) != 2 {
+				t.Fatalf("the push was attempted %d times, want 2\nlog:\n%s",
+					len(got), logged.String())
+			}
+
+			if got[0] == "" {
+				t.Fatal("the first attempt sent no payload id, so a retry cannot be deduplicated")
+			}
+
+			if got[1] != got[0] {
+				t.Errorf("the retry sent payload id %q, want the first attempt's %q -- a new id "+
+					"makes LaunchDarkly ingest the batch twice", got[1], got[0])
+			}
+
+			// A v4 UUID, matching what the other LaunchDarkly-bound identifier uses.
+			if _, err := uuid.Parse(got[0]); err != nil {
+				t.Errorf("payload id %q is not a parseable UUID: %v", got[0], err)
+			}
+		})
+	}
+}
+
+// TestEventPushGivesEachBatchItsOwnPayloadID is the other half of the property. Repeating
+// an id within a batch is what deduplication needs; repeating it across batches would
+// make LaunchDarkly discard the second batch as a duplicate of the first.
+func TestEventPushGivesEachBatchItsOwnPayloadID(t *testing.T) {
+	logged := captureLog(t)
+
+	pushURI, ids := eventPushIDServer(t, http.StatusAccepted, http.StatusAccepted)
+
+	bridge := newEventPushBridge(t, pushURI)
+	salesforceBatches(t, bridge, eventBatch, eventBatch)
+
+	if _, err := runEventLoop(t, bridge, eventLoopReturnLimit); err != nil {
+		t.Fatalf("eventLoop returned unexpected error: %v", err)
+	}
+
+	got := ids()
+	if len(got) != 2 {
+		t.Fatalf("the push was attempted %d times, want 2 (one per batch)\nlog:\n%s",
+			len(got), logged.String())
+	}
+
+	if got[0] == got[1] {
+		t.Errorf("both batches sent payload id %q; a second batch reusing the first's id "+
+			"is discarded as a duplicate", got[0])
 	}
 }

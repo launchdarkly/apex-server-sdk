@@ -87,6 +87,10 @@ const (
 	//
 	// See: sdk-specs / SCMP-server-connection-minutes-polling (section 1.1).
 	INSTANCE_ID_HEADER = "X-LaunchDarkly-Instance-Id"
+	// PAYLOAD_ID_HEADER identifies one batch of events. LaunchDarkly deduplicates on it,
+	// so a batch that is sent twice is ingested once. The value is generated per batch
+	// and repeated by that batch's retry, which is what makes the retry safe.
+	PAYLOAD_ID_HEADER = "X-LaunchDarkly-Payload-ID"
 	// SCOPE_HEADER names the LaunchDarkly scope on Salesforce-bound requests, so the
 	// org can scope stored flag data and queued events to one of them. It is sent only
 	// when LD_SCOPE_KEY is configured, which keeps a bridge that has not opted in
@@ -581,6 +585,17 @@ func (bridge *Bridge) eventLoop() error {
 			// Two attempts is the entire budget, and it does not make delivery durable.
 			// Salesforce deletes the events as it hands them over, so a batch that fails
 			// both attempts is gone. The retry only makes that outcome less frequent.
+			// Generated per batch rather than per attempt, and deliberately outside
+			// the loop below. A retry that carried a fresh id would look like a new
+			// batch to LaunchDarkly, so the events would be counted twice.
+			//
+			// That matters for the one failure a retry cannot see: an attempt the
+			// service accepted whose response never reached the bridge. The retry
+			// cannot tell that from an attempt nobody received, so it sends again
+			// either way, and this header is what keeps the first outcome from
+			// double-counting. It mirrors the reference Go SDK's event sender.
+			payloadID := uuid.New().String()
+
 			for attempt := 0; attempt < EVENT_PUSH_ATTEMPTS; attempt++ {
 				if attempt > 0 {
 					log.Print("retrying the event push in: ", bridge.eventPushRetryDelay)
@@ -611,6 +626,7 @@ func (bridge *Bridge) eventLoop() error {
 				// Sent on every LaunchDarkly-bound request (matches the reference Go SDK,
 				// where DefaultHeaders carries the instance id across poll/stream/events).
 				pushRequest.Header.Set(INSTANCE_ID_HEADER, bridge.instanceID)
+				pushRequest.Header.Set(PAYLOAD_ID_HEADER, payloadID)
 
 				log.Print("pushing events to: " + pushURI)
 
