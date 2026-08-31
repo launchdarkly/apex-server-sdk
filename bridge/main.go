@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -442,21 +443,48 @@ func (bridge *Bridge) authorizeSalesforce() (error, bool) {
 	if err != nil {
 		return err, false
 	}
-	errorBody, err := ioutil.ReadAll(authResponse.Body)
+	// readErr is named apart from err because which error is in hand matters below. The
+	// status line arrives ahead of the body, so net/http hands back a complete StatusCode
+	// whether or not the body read finished. That makes the read error irrelevant to some
+	// of the branches below and decisive in others, so each one judges it for itself
+	// rather than one check up front settling it for all three.
+	errorBody, readErr := ioutil.ReadAll(authResponse.Body)
 	authResponse.Body.Close()
 
+	// A 401 or 403 is Salesforce rejecting the credential, and it rejects the same
+	// credential on every retry. The status code alone establishes that, so the failure
+	// stays permanent even when the body arrives short. Here the body is a log detail and
+	// nothing more, which makes the log line the only record of readErr. Returning readErr
+	// instead would be the worse bug: the caller reads a non-permanent error as worth
+	// retrying, so the daemon would spin forever against a credential that cannot work.
 	if authResponse.StatusCode == 401 || authResponse.StatusCode == 403 {
-		log.Print("Salesforce permanent auth failure: ", authResponse.StatusCode, string(errorBody), err)
+		log.Print("Salesforce permanent auth failure: ", authResponse.StatusCode, string(errorBody), readErr)
 		return errors.New("Salesforce Unauthorized"), true
 	}
 
+	// Every other non-200 turns the body into the error message, so a short read has to be
+	// reported rather than quietly truncating what the caller logs. The status code goes in
+	// the message either way. A token endpoint can answer with no body at all -- a 503 from
+	// a load balancer in front of Salesforce does -- and errors.New on an empty body yields
+	// an error that prints nothing.
 	if authResponse.StatusCode != 200 {
-		log.Print("Salesforce auth failure: ", authResponse.StatusCode, string(errorBody), err)
-		return errors.New(string(errorBody)), false
+		log.Print("Salesforce auth failure: ", authResponse.StatusCode, string(errorBody), readErr)
+		if readErr != nil {
+			// Wrapped rather than returned bare, so the status code reaches the
+			// operator on this path as well. The caller only logs this error, and
+			// "unexpected EOF" on its own does not say what failed.
+			return fmt.Errorf("Salesforce auth failure, status %d, response body read failed: %w",
+				authResponse.StatusCode, readErr), false
+		}
+		return errors.New("Salesforce auth failure, status " +
+			strconv.Itoa(authResponse.StatusCode) + ": " + string(errorBody)), false
 	}
 
-	if err != nil {
-		return err, false
+	// A 200 whose body did not arrive in full cannot be trusted to hold the whole token
+	// document, so the read error decides this branch. Retrying is right: Salesforce
+	// accepted the credential, and only the transfer failed.
+	if readErr != nil {
+		return readErr, false
 	}
 
 	var parsed AuthBody
