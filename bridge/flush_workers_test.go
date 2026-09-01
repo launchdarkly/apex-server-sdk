@@ -16,9 +16,8 @@ import (
 // The property that matters most is not the parallelism, it is what happens when every
 // slot is taken. EventREST.prepareEvents deletes the rows as it hands them over, so a
 // batch drained with nowhere to send it is a batch lost. The bridge therefore declines to
-// drain at all, which leaves the events in the org -- the same choice the other
-// LaunchDarkly SDKs make by keeping events in their outbox when every flush worker is
-// busy. TestDrainIsSkippedWhenEveryFlushSlotIsBusy is that assertion.
+// drain at all, which leaves the events in the org.
+// TestDrainIsSkippedWhenEveryFlushSlotIsBusy is that assertion.
 
 // blockingPushServer answers event pushes only once released, and reports how many pushes
 // have arrived. It is how a test holds flush slots open.
