@@ -819,11 +819,27 @@ func (bridge *Bridge) flushEvents(pushURI string, pollBytes []byte) {
 		log.Print("event push expected 200/202 got: ", pushResponse.StatusCode,
 			", ", pushDisposition(attempt, recoverable))
 
-		// A status that reports something wrong with the request gets no retry. The next
-		// attempt would send the same bytes to the same place.
-		if !recoverable {
-			return
+		if recoverable {
+			continue
 		}
+
+		// The same request cannot recover, so this batch gets no retry. Which kind of
+		// permanent failure it is still matters to whoever reads the log.
+		//
+		// The other SDKs stop event processing for a status that is not locally
+		// recoverable, and keep going for one that is. The bridge cannot make that
+		// distinction act yet: eventLoop returning cancels the context, which takes
+		// featureLoop and flag delivery with it, so stopping the event side alone is not
+		// available. Killing flag delivery over a misdirected events endpoint would be
+		// worse than what the SDKs do, not closer to it. Both branches therefore drop the
+		// batch and carry on, and differ in what they report. Decoupling the loops is what
+		// would let the second one stop.
+		if !isHTTPErrorLocallyRecoverable(pushResponse.StatusCode) {
+			log.Print("the event push is failing for a reason no batch will satisfy; "+
+				"check LD_EVENTS_URI and LD_SDK_KEY: ", pushURI)
+		}
+
+		return
 	}
 }
 
@@ -932,6 +948,26 @@ func pushDisposition(attempt int, recoverable bool) string {
 	}
 
 	return "out of attempts, this batch is lost"
+}
+
+// isHTTPErrorLocallyRecoverable reports whether a status the same request cannot recover
+// from might still be recovered by a different one.
+//
+// It matches isHttpLocallyRecoverable in js-core, which the event senders use to separate
+// two kinds of permanent failure. 413 rejects this payload's size; it says nothing about
+// the endpoint or the key, so resending these bytes is pointless while the next batch may
+// be perfectly fine. Every other permanent status reports something a different payload
+// would not fix.
+//
+// The event push classifies with this rather than with isHTTPErrorRecoverable alone,
+// because reusing the general function makes not retrying a 413 incidental -- it lands in
+// the same bucket as a 404 -- rather than a decision a reader can see.
+func isHTTPErrorLocallyRecoverable(statusCode int) bool {
+	if statusCode == 413 {
+		return true
+	}
+
+	return isHTTPErrorRecoverable(statusCode)
 }
 
 // isHTTPErrorRecoverable reports whether an HTTP error status might answer

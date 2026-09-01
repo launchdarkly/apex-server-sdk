@@ -660,3 +660,102 @@ func TestEventPushGivesEachBatchItsOwnPayloadID(t *testing.T) {
 			"is discarded as a duplicate", got[0])
 	}
 }
+
+// TestIsHTTPErrorLocallyRecoverable pins the one status that separates the two kinds of
+// permanent failure. 413 rejects the payload rather than the endpoint or the key, so a
+// different batch may succeed where this one cannot.
+func TestIsHTTPErrorLocallyRecoverable(t *testing.T) {
+	tests := []struct {
+		status int
+		want   bool
+	}{
+		// The payload is the problem, so a different one may be fine.
+		{status: 413, want: true},
+		// Retryable statuses are locally recoverable too -- the same request may work.
+		{status: 400, want: true},
+		{status: 408, want: true},
+		{status: 429, want: true},
+		{status: 500, want: true},
+		{status: 503, want: true},
+		// Nothing about a different batch would fix these.
+		{status: 401, want: false},
+		{status: 403, want: false},
+		{status: 404, want: false},
+		{status: 405, want: false},
+		{status: 410, want: false},
+	}
+
+	for _, test := range tests {
+		if got := isHTTPErrorLocallyRecoverable(test.status); got != test.want {
+			t.Errorf("isHTTPErrorLocallyRecoverable(%d) = %v, want %v",
+				test.status, got, test.want)
+		}
+	}
+}
+
+// TestEventPushDoesNotRetryATooLargePayload is the regression test for resending a batch
+// LaunchDarkly has already refused for its size. The bytes do not change between attempts,
+// so a second one cannot do better -- it only delays the next batch.
+//
+// The loop must also keep running. A 413 says nothing about the endpoint or the key, so the
+// next batch deserves its attempt.
+func TestEventPushDoesNotRetryATooLargePayload(t *testing.T) {
+	logged := captureLog(t)
+
+	// A second 202 is queued, so a wasted retry shows up as an attempt count rather than
+	// as a hang.
+	pushURI, attempts := eventPushServer(t, http.StatusRequestEntityTooLarge, http.StatusAccepted)
+
+	bridge := newEventPushBridge(t, pushURI)
+	salesforceOneBatch(t, bridge, eventBatch)
+
+	if _, err := runEventLoop(t, bridge, eventLoopReturnLimit); err != nil {
+		t.Fatalf("eventLoop returned unexpected error: %v", err)
+	}
+
+	if got := len(attempts()); got != 1 {
+		t.Errorf("the push was attempted %d times, want 1: a 413 rejects these bytes, so "+
+			"resending them cannot succeed\nlog:\n%s", got, logged.String())
+	}
+
+	if !strings.Contains(logged.String(), "this batch is lost") {
+		t.Errorf("the lost batch was not reported\nlog:\n%s", logged.String())
+	}
+
+	// A 413 is locally recoverable, so it must not be reported as a standing
+	// misconfiguration the way a 404 is.
+	if strings.Contains(logged.String(), "no batch will satisfy") {
+		t.Errorf("a 413 was reported as a permanent misconfiguration; a different batch "+
+			"may well succeed\nlog:\n%s", logged.String())
+	}
+}
+
+// TestEventPushReportsAStandingFailure is the other side of the same branch. A 404 is not
+// locally recoverable, so no batch will fix it and the log says where to look.
+func TestEventPushReportsAStandingFailure(t *testing.T) {
+	logged := captureLog(t)
+
+	pushURI, attempts := eventPushServer(t, http.StatusNotFound, http.StatusAccepted)
+
+	bridge := newEventPushBridge(t, pushURI)
+	salesforceOneBatch(t, bridge, eventBatch)
+
+	if _, err := runEventLoop(t, bridge, eventLoopReturnLimit); err != nil {
+		t.Fatalf("eventLoop returned unexpected error: %v", err)
+	}
+
+	if got := len(attempts()); got != 1 {
+		t.Errorf("the push was attempted %d times, want 1\nlog:\n%s", got, logged.String())
+	}
+
+	if !strings.Contains(logged.String(), "no batch will satisfy") {
+		t.Errorf("a 404 was not reported as a standing failure\nlog:\n%s", logged.String())
+	}
+
+	// The event loop keeps running: the bridge cannot stop event processing without
+	// taking flag delivery down with it.
+	if !strings.Contains(logged.String(), "event polling waiting for") {
+		t.Errorf("the loop stopped rather than continuing to the next cycle\nlog:\n%s",
+			logged.String())
+	}
+}
