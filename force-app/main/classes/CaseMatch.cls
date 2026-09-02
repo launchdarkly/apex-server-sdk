@@ -19,13 +19,34 @@ public class CaseMatch {
     return wanted.equals(actual);
   }
 
-  // The records of this exact scope only. Use this before a delete. A delete gets no fallback
-  // to the other casings: the first push of a new scope finds no records of its own, so a
-  // fallback would delete every record of the scope whose key differs only by case.
+  // The records of this exact scope only. Use this before a store push or an event drain.
+  // Neither gets a fallback to the other casings, for a different reason each.
+  //
+  // A store push gets none because the first push of a new scope finds no records of its own,
+  // so a fallback would delete every record of the scope whose key differs only by case.
+  //
+  // A drain gets none because it reads a bounded window. A fallback there cannot tell a scope
+  // that has no events from one whose events sit below the window, so it would hand another
+  // scope's events, and the user attributes they carry, to this bridge's environment under
+  // this bridge's SDK key.
   public static List<VersionedData__c> onlyScope(List<VersionedData__c> rows, String scope) {
     List<VersionedData__c> exact = new List<VersionedData__c>();
 
     for (VersionedData__c row : rows) {
+      if (sameScope(scope, row.Scope__c)) {
+        exact.add(row);
+      }
+    }
+
+    return exact;
+  }
+
+  // The events of this exact scope only. Refer to the overload above. Apex cannot write one
+  // body for two SObject types without giving up the compiler's check on the field.
+  public static List<EventData__c> onlyScope(List<EventData__c> rows, String scope) {
+    List<EventData__c> exact = new List<EventData__c>();
+
+    for (EventData__c row : rows) {
       if (sameScope(scope, row.Scope__c)) {
         exact.add(row);
       }

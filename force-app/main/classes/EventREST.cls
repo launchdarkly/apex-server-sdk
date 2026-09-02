@@ -6,21 +6,26 @@ global with sharing class EventREST {
   public static final String SCOPE_HEADER = 'LD-Scope-Key';
 
   // The rows one drain reads and deletes. A drain has to stay under three governor limits:
-  // 6 MB of synchronous heap, 10,000 DML rows, and 50,000 query rows. An unbounded drain
+  // 10,000 DML rows, 50,000 query rows, and 6 MB of synchronous heap. An unbounded drain
   // throws before it reaches the delete once the table passes any of them, so nothing is
   // removed and the table can never shrink again.
   //
-  // A row count does not bound heap by itself. Raw__c is a long text field that holds up to
-  // 131,072 characters, so the cost of a drain follows total payload bytes rather than rows.
-  // This number rests on an average Raw__c of a few kilobytes. A typical event serializes to
-  // 200-700 bytes, and the largest realistic one -- a JSON flag value, which is serialized
-  // into both value and default -- costs about 6 KB. Even at 6 KB a drain reads 1.2 MB, which
-  // leaves the rest of the heap for the parsed events and the bundle built from them. An org
-  // whose events run far larger than that needs a smaller number here.
+  // This number answers the two limits a row count can answer. It is five times under the DML
+  // row limit and twenty-five times under the query row limit, so a drain cannot reach either.
   //
-  // The bridge polls every 30 seconds and a backlog simply takes more polls to clear, so a
-  // small number costs delivery latency on a backlog and nothing in steady state.
-  public static final Integer MAX_EVENTS_PER_DRAIN = 200;
+  // It also sits above maxEventsInQueue, which defaults to 1000. EventSink applies that cap to
+  // the table on every insert, and it counts the same rows this drain queries. A bound below
+  // the cap makes the drain rather than the cap decide how fast events leave the org: the
+  // queue then sits at the cap and sinkGeneric drops every event that arrives. Above the cap
+  // the default configuration drains completely on every poll.
+  //
+  // A row count cannot answer the heap limit. Raw__c is a long text field that holds up to
+  // 131,072 characters, so the heap a drain needs follows total payload bytes and not rows.
+  // How many rows fit in 6 MB depends on what an org puts in its flag values and its user
+  // attributes, which this SDK cannot know. A row bound lowers the exposure in proportion to
+  // itself. It does not remove it, and an org that raises maxEventsInQueue or carries large
+  // flag values can still reach the heap limit at this number.
+  public static final Integer MAX_EVENTS_PER_DRAIN = 2000;
 
   @HttpGet
   global static void doGet() {
@@ -57,52 +62,17 @@ global with sharing class EventREST {
 
     // Salesforce compares text without regard to letter case, so the window can also hold the
     // rows of a scope key that differs from this one by case alone. No other scope reaches it,
-    // because the query has already compared the keys.
-    List<EventData__c> mine = new List<EventData__c>();
-
-    for (EventData__c row : window) {
-      if (CaseMatch.sameScope(scope, row.Scope__c)) {
-        mine.add(row);
-      }
-    }
-
-    // What the drain deletes and what it delivers are two separate questions once the window
-    // is bounded.
+    // because the query has already compared the keys. Those rows are left where they are,
+    // and refer to onlyScope for why the drain gets no fallback to them.
     //
-    // Deleting the whole window when none of it belongs to this scope is what shrinks the
-    // table on every call, and that is how an org already past a governor limit recovers.
-    // Delivering that window is a different matter. A bounded window carries no evidence
-    // about the rows below it, so a key that differs only by case can fill the window while
-    // this scope's own rows wait behind it. Delivering those rows posts another scope's
-    // events, and the user attributes they carry, to this bridge's environment under this
-    // bridge's SDK key.
-    //
-    // A window that is not full is the one case where delivering it is safe. Such a window
-    // holds every row the filter matches, so a window with none of this scope's rows proves
-    // this scope has no rows at all. Nothing else drains events, which makes a bridge whose
-    // key differs in case from the Apex client that wrote them the only reader those rows
-    // will ever have.
-    //
-    // A full window is dropped instead. Losing the events of a configuration this SDK does
-    // not support beats posting them to the wrong environment.
-    //
-    // Nothing is dropped when the bridge and the Apex client agree on the key. A drop needs a
-    // window with none of this scope's rows in it, and only a colliding key puts rows there.
-    List<EventData__c> toDelete;
-    List<EventData__c> toDeliver;
+    // A drain reads a bounded window, so a key colliding on case can fill the window and hide
+    // this scope's own rows below it. That scope then stops draining until the colliding rows
+    // go. It takes more rows than maxEventsInQueue to reach, since the cap counts the casings
+    // together, so batchEvents or a raised cap has to be in play as well. This SDK does not
+    // support keys that differ only by case and does not try to make this case work.
+    List<EventData__c> events = CaseMatch.onlyScope(window, scope);
 
-    if (!mine.isEmpty()) {
-      toDelete = mine;
-      toDeliver = mine;
-    } else if (window.size() < MAX_EVENTS_PER_DRAIN) {
-      toDelete = window;
-      toDeliver = window;
-    } else {
-      toDelete = window;
-      toDeliver = new List<EventData__c>();
-    }
-
-    for (EventData__c event : toDeliver) {
+    for (EventData__c event : events) {
       switch on event.Kind__c {
         when 'feature' {
           Object parsed = (Object) JSON.deserializeUntyped(event.Raw__c);
@@ -115,7 +85,7 @@ global with sharing class EventREST {
       }
     }
 
-    delete toDelete;
+    delete events;
 
     return processor.buildEventBundle();
   }

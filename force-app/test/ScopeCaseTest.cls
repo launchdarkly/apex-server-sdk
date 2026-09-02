@@ -80,19 +80,26 @@ private class ScopeCaseTest {
     System.assertEquals('alpha', left.get(0).Scope__c);
   }
 
-  // A bridge whose scope key differs in case from the Apex client's still drains, because
-  // nothing else drains those events. Refer to EventREST.prepareEvents.
+  // This drain used to fall back to a colliding scope's events when it found none of its own,
+  // so that a bridge whose key differs in case from the Apex client still delivered them.
+  // The behavior changed with SDK-3042 and this test changed with it.
   //
-  // The bundle is asserted as well as the delete. Draining the rows without delivering them
-  // would satisfy the count and still lose every event.
+  // That fallback rested on reading the whole table. It fired only when the scope had no
+  // events anywhere, and in that case nothing else would ever drain them. The drain now reads
+  // a bounded window and cannot tell a scope that has no events from one whose events sit
+  // below the window, so the same fallback would deliver another scope's events, and the user
+  // attributes they carry, to this bridge's environment under this bridge's SDK key.
+  //
+  // The events stay put instead. They accumulate to the queue cap, which is the outcome the
+  // documentation already describes for a key this SDK does not support.
   @isTest
-  static void aDrainFallsBackWhenNoEventsMatchExactly() {
+  static void aDrainLeavesACollidingScopeAlone() {
     new EventSink(1000, 'Alpha').sinkGeneric('custom', '{}');
 
     Object bundle = EventREST.prepareEvents('alpha');
 
-    System.assertEquals(1, ((List<Object>) bundle).size());
-    System.assertEquals(0, [SELECT COUNT() FROM EventData__c]);
+    System.assertEquals(0, ((List<Object>) bundle).size());
+    System.assertEquals(1, [SELECT COUNT() FROM EventData__c]);
   }
 
   @isTest
