@@ -33,27 +33,4 @@ public class CaseMatch {
 
     return exact;
   }
-
-  // The events of this exact scope, or every event when none belongs to it.
-  //
-  // This one keeps a fallback, unlike the delete above. The bridge drains events, and nothing
-  // else does. A bridge whose scope key differs in case from the Apex client that wrote the
-  // events must still drain them, or they stay queued until they reach the queue cap. Two
-  // scopes whose keys differ only by case still drain separately, because each one has events
-  // of its own that match exactly.
-  public static List<EventData__c> eventsForScope(List<EventData__c> rows, String scope) {
-    List<EventData__c> exact = new List<EventData__c>();
-
-    for (EventData__c row : rows) {
-      if (sameScope(scope, row.Scope__c)) {
-        exact.add(row);
-      }
-    }
-
-    if (exact.isEmpty()) {
-      return rows;
-    }
-
-    return exact;
-  }
 }

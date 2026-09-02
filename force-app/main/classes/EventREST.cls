@@ -42,33 +42,67 @@ global with sharing class EventREST {
     // drain delivers another scope's events to this bridge's environment under this bridge's
     // SDK key, and those events carry user attributes.
     //
-    // The scope filter matches other casings as well, so narrow the rows before the drain
-    // deletes them. Refer to eventsForScope for why this one keeps a fallback.
-    //
     // The limit sits on the query because the query itself reaches the heap limit. A trim
     // after the query reads the rows before it drops them, which saves nothing.
     //
     // The order is oldest first, and Id breaks ties so that the order is total. A drain that
     // reads the same rows on every call never works through a backlog.
-    //
-    // eventsForScope narrows the window after it is read, so a scoped drain can return fewer
-    // rows than the limit. Only a key that differs from this scope's key by letter case can
-    // hold a slot in the window, since Salesforce has already compared the keys without
-    // regard to case. Such a key is unsupported, and the fallback drains the window whenever
-    // it holds none of this scope's rows, so every drain deletes at least one row it read.
-    // That is what lets a table already past a governor limit shrink on repeated drains.
-    List<EventData__c> events = CaseMatch.eventsForScope(
-      [
-        SELECT Kind__c, Raw__c, Scope__c
-        FROM EventData__c
-        WHERE Scope__c = :scope
-        ORDER BY CreatedDate ASC, Id ASC
-        LIMIT :MAX_EVENTS_PER_DRAIN
-      ],
-      scope
-    );
+    List<EventData__c> window = [
+      SELECT Kind__c, Raw__c, Scope__c
+      FROM EventData__c
+      WHERE Scope__c = :scope
+      ORDER BY CreatedDate ASC, Id ASC
+      LIMIT :MAX_EVENTS_PER_DRAIN
+    ];
 
-    for (EventData__c event : events) {
+    // Salesforce compares text without regard to letter case, so the window can also hold the
+    // rows of a scope key that differs from this one by case alone. No other scope reaches it,
+    // because the query has already compared the keys.
+    List<EventData__c> mine = new List<EventData__c>();
+
+    for (EventData__c row : window) {
+      if (CaseMatch.sameScope(scope, row.Scope__c)) {
+        mine.add(row);
+      }
+    }
+
+    // What the drain deletes and what it delivers are two separate questions once the window
+    // is bounded.
+    //
+    // Deleting the whole window when none of it belongs to this scope is what shrinks the
+    // table on every call, and that is how an org already past a governor limit recovers.
+    // Delivering that window is a different matter. A bounded window carries no evidence
+    // about the rows below it, so a key that differs only by case can fill the window while
+    // this scope's own rows wait behind it. Delivering those rows posts another scope's
+    // events, and the user attributes they carry, to this bridge's environment under this
+    // bridge's SDK key.
+    //
+    // A window that is not full is the one case where delivering it is safe. Such a window
+    // holds every row the filter matches, so a window with none of this scope's rows proves
+    // this scope has no rows at all. Nothing else drains events, which makes a bridge whose
+    // key differs in case from the Apex client that wrote them the only reader those rows
+    // will ever have.
+    //
+    // A full window is dropped instead. Losing the events of a configuration this SDK does
+    // not support beats posting them to the wrong environment.
+    //
+    // Nothing is dropped when the bridge and the Apex client agree on the key. A drop needs a
+    // window with none of this scope's rows in it, and only a colliding key puts rows there.
+    List<EventData__c> toDelete;
+    List<EventData__c> toDeliver;
+
+    if (!mine.isEmpty()) {
+      toDelete = mine;
+      toDeliver = mine;
+    } else if (window.size() < MAX_EVENTS_PER_DRAIN) {
+      toDelete = window;
+      toDeliver = window;
+    } else {
+      toDelete = window;
+      toDeliver = new List<EventData__c>();
+    }
+
+    for (EventData__c event : toDeliver) {
       switch on event.Kind__c {
         when 'feature' {
           Object parsed = (Object) JSON.deserializeUntyped(event.Raw__c);
@@ -81,7 +115,7 @@ global with sharing class EventREST {
       }
     }
 
-    delete events;
+    delete toDelete;
 
     return processor.buildEventBundle();
   }

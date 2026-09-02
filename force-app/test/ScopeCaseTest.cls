@@ -81,13 +81,17 @@ private class ScopeCaseTest {
   }
 
   // A bridge whose scope key differs in case from the Apex client's still drains, because
-  // nothing else drains those events. Refer to CaseMatch.eventsForScope.
+  // nothing else drains those events. Refer to EventREST.prepareEvents.
+  //
+  // The bundle is asserted as well as the delete. Draining the rows without delivering them
+  // would satisfy the count and still lose every event.
   @isTest
   static void aDrainFallsBackWhenNoEventsMatchExactly() {
     new EventSink(1000, 'Alpha').sinkGeneric('custom', '{}');
 
-    EventREST.prepareEvents('alpha');
+    Object bundle = EventREST.prepareEvents('alpha');
 
+    System.assertEquals(1, ((List<Object>) bundle).size());
     System.assertEquals(0, [SELECT COUNT() FROM EventData__c]);
   }
 

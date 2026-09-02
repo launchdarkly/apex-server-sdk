@@ -104,6 +104,43 @@ private class EventRESTTest {
     System.assertEquals(3, [SELECT COUNT() FROM EventData__c WHERE Scope__c = 'beta']);
   }
 
+  // The fallback still delivers when the window is not full, which is the case it exists for.
+  // A drain that deleted these rows without returning them would leave the case-mismatched
+  // bridge posting nothing while its events were destroyed.
+  @isTest
+  static void aFallbackStillDeliversWhenTheWindowIsNotFull() {
+    insertEvents(3, 'Alpha');
+
+    System.assertEquals(3, drainedCount('alpha'));
+    System.assertEquals(0, [SELECT COUNT() FROM EventData__c]);
+  }
+
+  // A full window of another casing must not reach the bundle. The drain still deletes it, so
+  // the table shrinks, but delivering it would post that scope's events -- and the user
+  // attributes they carry -- to this bridge's environment under this bridge's SDK key.
+  //
+  // Only the three 'alpha' rows may ever be delivered, whatever order the rows come back in.
+  // A row of this scope is deleted only on a call that also delivers it, so the total is
+  // exactly three. Before the window was bounded this returned all 203.
+  @isTest
+  static void aFullWindowOfAnotherCasingIsNotDelivered() {
+    insertEvents(EventREST.MAX_EVENTS_PER_DRAIN, 'Alpha');
+    insertEvents(3, 'alpha');
+
+    Integer delivered = 0;
+    Integer calls = 0;
+
+    while ([SELECT COUNT() FROM EventData__c] > 0) {
+      delivered += drainedCount('alpha');
+      calls++;
+
+      System.assert(delivered <= 3, 'the drain delivered ' + delivered + ' rows of one scope');
+      System.assert(calls <= 4, 'the drain took more calls than the fixture needs');
+    }
+
+    System.assertEquals(3, delivered);
+  }
+
   // The bound is applied by the query, and the query also matches a scope key that differs
   // from this one by letter case alone. A colliding key can therefore hold every slot in the
   // window while this scope still has rows waiting. No other scope can, because Salesforce
@@ -113,8 +150,7 @@ private class EventRESTTest {
   // them lands in the window. Assert the property that holds under any order: every drain
   // deletes rows it read, so the table keeps shrinking and the drain never stalls. Each call
   // either takes at least one of this scope's rows, or finds none of them in the window and
-  // falls back to draining the whole window. Refer to CaseMatch.eventsForScope for why the
-  // fallback is there.
+  // deletes the whole window.
   //
   // Four calls therefore clear this fixture whatever the order. At most three of them take
   // one of the three 'alpha' rows, and the call after 'alpha' runs out takes the window.
