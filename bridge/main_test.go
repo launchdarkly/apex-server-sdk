@@ -36,7 +36,7 @@ func newTestBridge(t *testing.T, baseURI, eventsURI string) *Bridge {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	return &Bridge{
+	bridge := &Bridge{
 		client:                http.Client{},
 		salesforceURL:         "http://salesforce.invalid/",
 		launchDarklyKey:       "fake-sdk-key",
@@ -56,6 +56,12 @@ func newTestBridge(t *testing.T, baseURI, eventsURI string) *Bridge {
 		context:             ctx,
 		cancel:              cancel,
 	}
+
+	// eventLoop takes a flush slot before every drain, so a bridge built without them
+	// never drains at all.
+	bridge.initFlushControls()
+
+	return bridge
 }
 
 // TestInstanceIDIsValidUUIDv4 asserts that newBridge generates a parseable v4
@@ -460,11 +466,35 @@ func TestFeatureLoopUsesConfiguredInterval(t *testing.T) {
 	}
 }
 
+// syncBuffer collects log output that more than one goroutine may touch.
+//
+// log.Logger serialises its own writes, so a plain bytes.Buffer is safe against
+// concurrent writers -- but not against a test reading it while a loop under test is
+// still running. Since the event push now runs on its own goroutine, a test that asserts
+// on the log before the loop has returned races the loop without this.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // captureLog redirects the standard logger for the duration of a test and returns a
-// buffer holding whatever was written to it.
-func captureLog(t *testing.T) *bytes.Buffer {
+// buffer holding whatever was written to it. The buffer is safe to read while the code
+// under test is still writing to it.
+func captureLog(t *testing.T) *syncBuffer {
 	t.Helper()
-	var buf bytes.Buffer
+	var buf syncBuffer
 	previousFlags := log.Flags()
 	log.SetOutput(&buf)
 	log.SetFlags(0)
