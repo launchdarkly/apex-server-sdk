@@ -16,6 +16,8 @@ export LD_SDK_KEY='Your LaunchDarkly SDK key'
 # such as: 'sdk-36f084b0-a57b-42a6-831e-1e20b7631b92'
 export SALESFORCE_URL='Your Salesforce Apex REST URL'
 # such as: 'https://na123.salesforce.com/services/apexrest/'
+# both the host and the path have to be right, and the host authenticates as well under
+# the client credentials grant -- refer to "Getting the host right" below
 export OAUTH_ID='Your Salesforce OAuth Id'
 # such as: 'BfBGjyY0.8XTDtB6enx5WXSATZ6mhPhnn.V2xK2Q8aYIW7KBS4r.7RA5QDbhaVOc4swvGZUqao-4X2S6Z-MdP'
 
@@ -118,6 +120,26 @@ new orgs and is retiring it, and it requires a security token appended to the pa
 daemon logs a warning at startup when this flow is selected. It will be removed in a future
 major version.
 
+### Getting the host right
+
+`SALESFORCE_URL` supplies both the host and the path of every API call, and both have to be
+correct. The host authenticates as well: under the client credentials grant the token
+endpoint is derived from it when `OAUTH_URI` is unset.
+
+The usual mistake is copying the URL out of the browser address bar. That is the
+**Lightning host**, `https://mycompany.lightning.force.com/`, which serves the Salesforce UI
+and not the API. The host you want is the org's **My Domain** host,
+`https://mycompany.my.salesforce.com/`.
+
+A session is only valid on the host it was issued for, so a `SALESFORCE_URL` naming a
+different host fails every call with `INVALID_SESSION_ID`. Salesforce reports the host it did
+issue the session for as `instance_url` in the token response, which you never see. The
+daemon compares the two, and says so when a request is refused, the token is refreshed, and
+the request is refused again:
+
+```
+Salesforce refused the request again after a token refresh, and SALESFORCE_URL does not match the URL Salesforce issued the session for. A session is only valid on the URL it was issued for, so check SALESFORCE_URL against the org's "My Domain" host.
+```
 ### Choosing the flow implicitly
 
 `OAUTH_GRANT_TYPE` is optional. When it is unset the flow is inferred from the credentials

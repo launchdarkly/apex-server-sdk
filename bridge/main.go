@@ -116,8 +116,12 @@ const (
 )
 
 type Bridge struct {
-	client                http.Client
-	salesforceURL         string
+	client        http.Client
+	salesforceURL string
+	// salesforceInstanceURL is the instance_url of the last auth response. It is compared
+	// against SALESFORCE_URL after a refused request and read nowhere else, and it is
+	// guarded by lock, because both loops authenticate through requestWithOauth.
+	salesforceInstanceURL string
 	launchDarklyKey       string
 	launchDarklyBaseURI   string
 	launchDarklyEventsURI string
@@ -430,6 +434,9 @@ func newBridge() (*Bridge, error) {
 
 type AuthBody struct {
 	AccessToken string `json:"access_token"`
+	// InstanceURL is the URL Salesforce issued the session for, and the only place that
+	// URL appears. All three grants the bridge uses return it.
+	InstanceURL string `json:"instance_url"`
 }
 
 type JWTClaim struct {
@@ -561,8 +568,34 @@ func (bridge *Bridge) authorizeSalesforce() (error, bool) {
 	bridge.lock.Lock()
 	defer bridge.lock.Unlock()
 	bridge.oauthCurrentToken = parsed.AccessToken
+	bridge.salesforceInstanceURL = parsed.InstanceURL
 
 	return nil, false
+}
+
+// reportPossibleHostMismatch reports that SALESFORCE_URL and the URL Salesforce issued the
+// session for disagree, after a Salesforce request has been refused twice.
+//
+// The second refusal is what makes it worth saying, the first usually being a token expiry
+// that the refresh above fixes on its own. Nothing is compared while requests succeed,
+// because a URL that differs can still be the right one and success settles that -- a
+// SALESFORCE_URL carrying userinfo is the known wrong answer, since userinfo sits ahead of
+// the host and so fails the test below. Neither URL is logged, because SALESFORCE_URL can
+// carry a credential and neither is needed to act on the message.
+func (bridge *Bridge) reportPossibleHostMismatch() {
+	bridge.lock.Lock()
+	instanceURL := bridge.salesforceInstanceURL
+	bridge.lock.Unlock()
+
+	// A prefix test, because SALESFORCE_URL carries the Apex REST path while instance_url
+	// is a bare origin, so the two are never equal. An empty one is a prefix of anything.
+	if strings.HasPrefix(strings.ToLower(bridge.salesforceURL), strings.ToLower(instanceURL)) {
+		return
+	}
+
+	log.Print("Salesforce refused the request again after a token refresh, and SALESFORCE_URL " +
+		"does not match the URL Salesforce issued the session for. A session is only valid on " +
+		"the URL it was issued for, so check SALESFORCE_URL against the org's \"My Domain\" host.")
 }
 
 // drainAndClose finishes with a response whose body the caller does not need.
@@ -637,9 +670,10 @@ func (bridge *Bridge) sendWithToken(request *http.Request) (*http.Response, erro
 // trip instead.
 //
 // One retry, never more. A token minted seconds ago being refused is not an expiry, so
-// refreshing again cannot change the answer: it means the connected app's permissions or
-// its run-as identity changed. That response is handed back as it stands, so the loop logs it
-// and waits, instead of spending the org's API allocation on a rejection that repeats.
+// refreshing again cannot change the answer: it means the connected app's permissions or its
+// run-as identity changed, or the request is going to a host the session does not belong to.
+// That response is handed back as it stands, so the loop logs it and waits, instead of
+// spending the org's API allocation on a rejection that repeats.
 //
 // The caller owns the returned response and must finish with it. Every response this
 // function does not return is drained and closed here, so nothing keeps holding a
@@ -667,6 +701,11 @@ func (bridge *Bridge) requestWithOauth(request *http.Request) (*http.Response, e
 	response, err = bridge.sendWithToken(request)
 	if err != nil {
 		return nil, err, false
+	}
+
+	// A token minted seconds ago being refused is the one moment a hint cannot be premature.
+	if response.StatusCode == 401 || response.StatusCode == 403 {
+		bridge.reportPossibleHostMismatch()
 	}
 
 	return response, nil, false
