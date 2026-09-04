@@ -46,7 +46,7 @@ const (
 	GRANT_CLIENT_CREDENTIALS = "client-credentials"
 	GRANT_PASSWORD           = "password"
 	DEFAULT_POLL_INTERVAL    = 30 * time.Second
-	SDK_VERSION              = "1.5.1" // x-release-please-version
+	SDK_VERSION              = "1.6.0" // x-release-please-version
 	USER_AGENT               = "ApexServerClient/" + SDK_VERSION
 	HTTP_TIMEOUT             = 30 * time.Second
 	// MIN_FLAG_POLL_INTERVAL is the shortest FLAG_POLL_INTERVAL the bridge honors,

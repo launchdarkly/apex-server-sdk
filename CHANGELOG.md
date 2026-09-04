@@ -2,6 +2,28 @@
 
 All notable changes to the LaunchDarkly Apex server-side SDK will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org).
 
+## [1.6.0](https://github.com/launchdarkly/apex-server-sdk/compare/1.5.1...1.6.0) (2026-09-04)
+
+
+### Features
+
+* Add configurable event and flag poll intervals to the bridge ([#60](https://github.com/launchdarkly/apex-server-sdk/issues/60)) ([7aebb5b](https://github.com/launchdarkly/apex-server-sdk/commit/7aebb5bf4f1ca6cc35939f9c9e86876cb1299ee7))
+* Push events on their own goroutines instead of blocking the drain ([#72](https://github.com/launchdarkly/apex-server-sdk/issues/72)) ([14f6efb](https://github.com/launchdarkly/apex-server-sdk/commit/14f6efb77b883549057526d350cf0979673c2922))
+* Retry the event push to LaunchDarkly once before giving up ([#69](https://github.com/launchdarkly/apex-server-sdk/issues/69)) ([76f68d1](https://github.com/launchdarkly/apex-server-sdk/commit/76f68d18496ec7da1d668c49ebfe7b97d40c73c7))
+* Support more than one LaunchDarkly project and environment per Salesforce org ([#64](https://github.com/launchdarkly/apex-server-sdk/issues/64)) ([941055a](https://github.com/launchdarkly/apex-server-sdk/commit/941055ac4f5b9cce8f6a440f7cb0ef2c8c20dcb6))
+* Support the OAuth client credentials flow in the bridge ([#65](https://github.com/launchdarkly/apex-server-sdk/issues/65)) ([4536966](https://github.com/launchdarkly/apex-server-sdk/commit/453696628064f3db236af86385ec74d35c0807f2))
+
+
+### Bug Fixes
+
+* Check the error from constructing the event poll request ([#67](https://github.com/launchdarkly/apex-server-sdk/issues/67)) ([7e9a41d](https://github.com/launchdarkly/apex-server-sdk/commit/7e9a41d10847cd66ab938891954b6d8c9f3a4bdd))
+* Check the token response body read error where the body is load-bearing ([#68](https://github.com/launchdarkly/apex-server-sdk/issues/68)) ([74f3036](https://github.com/launchdarkly/apex-server-sdk/commit/74f30366a33b5f6bdd04f0419323e69f8e24d2e8))
+* Finish with HTTP responses so connections can be reused ([#62](https://github.com/launchdarkly/apex-server-sdk/issues/62)) ([9477007](https://github.com/launchdarkly/apex-server-sdk/commit/94770074a54e222c3022701967374f88f83fb5b2))
+* Make a zero cache TTL disable caching instead of disabling flag data ([#66](https://github.com/launchdarkly/apex-server-sdk/issues/66)) ([07dec93](https://github.com/launchdarkly/apex-server-sdk/commit/07dec936e4678a3e5f253a10e279ea918a4c8566))
+* Report a SALESFORCE_URL host mismatch when Salesforce refuses the request ([#73](https://github.com/launchdarkly/apex-server-sdk/issues/73)) ([5f119ab](https://github.com/launchdarkly/apex-server-sdk/commit/5f119abd59115b02db8f1e19f3c690401621b9af))
+* Report the real error when the flag push request cannot be built ([#71](https://github.com/launchdarkly/apex-server-sdk/issues/71)) ([860b311](https://github.com/launchdarkly/apex-server-sdk/commit/860b3115c0295ffb0525cdddd8ac46674547b2ad))
+* Retry a Salesforce request once after refreshing the token ([#70](https://github.com/launchdarkly/apex-server-sdk/issues/70)) ([08a8836](https://github.com/launchdarkly/apex-server-sdk/commit/08a883686e462e1338d15f4b17c24d1bf6a8c4da))
+
 ## [1.5.1](https://github.com/launchdarkly/apex-server-sdk/compare/1.5.0...1.5.1) (2026-06-22)
 
 
