@@ -40,7 +40,8 @@ Two things, both about data rather than about resolution:
 - A push for one scope never deletes the records of a scope whose key differs only by case. A
   bridge started with `alpha` leaves everything belonging to `Alpha` in place.
 - A bridge never drains and deletes the queued events of a scope whose key differs only by
-  case, as long as that scope has events of its own.
+  case. Those events stay queued, and they count against that scope's `maxEventsInQueue`
+  until a bridge configured with their exact key drains them.
 
 ### What is not affected
 

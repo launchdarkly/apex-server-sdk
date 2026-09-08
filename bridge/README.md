@@ -68,6 +68,11 @@ export FLAG_POLL_INTERVAL='How often to poll LaunchDarkly for flag data'
 # such as: '5m'
 # if not set or unparseable, defaults to: '30s'
 # minimum is '30s'; anything shorter is clamped up to '30s'
+export MAX_EVENTS_PER_DRAIN='How many events one drain may take'
+# such as: '2000'
+# if not set, unparseable, zero, or negative, defaults to: '10000'
+# maximum is '10000'; anything larger is lowered to it
+# lower it if a drain runs out of Apex heap -- refer to "How many events one drain takes"
 ```
 
 ## Authentication
@@ -291,3 +296,23 @@ Whether a short interval is affordable therefore depends on your edition and lic
 count. On a large org a 1-second drain is a few percent of the allocation; on a small
 production org the same setting consumes most of the org's entire daily budget for this
 one integration, leaving little for everything else that calls the API.
+
+## How many events one drain takes
+
+Each drain asks the org for at most `MAX_EVENTS_PER_DRAIN` rows, sends them to
+LaunchDarkly, and the org deletes exactly the rows it handed over. The default is 10,000
+and that is also the maximum; a larger value is lowered to it and the startup log says so.
+
+The maximum is a Salesforce governor limit on how many rows one Apex transaction can
+delete, and the drain runs in one transaction.
+
+**A row count cannot bound everything.** A transaction also has 6 MB of heap, and the heap
+a drain needs follows the total size of the event payloads rather than the number of rows.
+How many rows fit in 6 MB depends on what your flag values and user attributes look like,
+which neither the bridge nor the SDK can know for you. If the bridge logs a poll that keeps
+failing and the queue keeps growing, lower `MAX_EVENTS_PER_DRAIN` until the drain fits. The
+next poll then recovers on its own, and the table shrinks with every drain after that.
+
+A value the bridge cannot use is treated as unset, matching the poll intervals: unset,
+empty, unparseable, zero and negative all fall back to the default, and the value actually
+in effect is logged at startup. Check that log after changing it.

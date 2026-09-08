@@ -113,6 +113,21 @@ const (
 	// when LD_SCOPE_KEY is configured, which keeps a bridge that has not opted in
 	// indistinguishable from one running an older version.
 	SCOPE_HEADER = "LD-Scope-Key"
+	// MAX_EVENTS_PARAM is the query parameter that tells the org how many events one
+	// drain may read and delete, and MAX_EVENTS_PER_DRAIN is what the bridge asks for
+	// when the environment variable of the same name is unset.
+	//
+	// 10,000 is the most rows one Apex transaction can delete, and a drain deletes
+	// exactly the rows it read. The org enforces the same ceiling and lowers anything
+	// above it, so this copy is advisory: when the two sides are versioned apart, the
+	// org's number is the one that holds.
+	//
+	// A row count cannot bound the heap a drain needs, which follows total payload
+	// bytes rather than rows. An org that carries large flag values or user attributes
+	// lowers MAX_EVENTS_PER_DRAIN until the drain fits, with no new release of either
+	// side.
+	MAX_EVENTS_PARAM     = "maxEvents"
+	MAX_EVENTS_PER_DRAIN = 10000
 )
 
 type Bridge struct {
@@ -149,6 +164,10 @@ type Bridge struct {
 	// default to DEFAULT_POLL_INTERVAL and are configurable per loop.
 	eventPollInterval time.Duration
 	flagPollInterval  time.Duration
+	// maxEventsPerDrain is how many events the bridge asks one drain to take. It rides
+	// on the poll URI as MAX_EVENTS_PARAM. It is range-checked at startup, so it is
+	// always positive and never above MAX_EVENTS_PER_DRAIN.
+	maxEventsPerDrain int
 	// eventPushRetryDelay is how long eventLoop waits before it retries an event
 	// push. It always holds EVENT_PUSH_RETRY_DELAY outside of tests.
 	eventPushRetryDelay time.Duration
@@ -187,6 +206,45 @@ func parseDurationFromEnv(name string, fallback time.Duration) time.Duration {
 	}
 
 	return parsed
+}
+
+func parseIntFromEnv(name string, fallback int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		log.Printf("%s is not set, using the default of %d", name, fallback)
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		log.Printf("%s (%s) failed to parse to an integer, using %d", name, raw, fallback)
+		return fallback
+	}
+
+	return parsed
+}
+
+// resolveMaxEventsPerDrain reads MAX_EVENTS_PER_DRAIN and holds it to the range the org
+// can honor.
+//
+// The range is checked here rather than left to the org so that a value the bridge cannot
+// use is named at startup. The org lowers an over-large request as well, but a drain the
+// org lowered says nothing about why it was lowered.
+func resolveMaxEventsPerDrain() int {
+	resolved := parseIntFromEnv("MAX_EVENTS_PER_DRAIN", MAX_EVENTS_PER_DRAIN)
+
+	if resolved <= 0 {
+		log.Printf("MAX_EVENTS_PER_DRAIN (%d) is non-positive, using %d", resolved, MAX_EVENTS_PER_DRAIN)
+		return MAX_EVENTS_PER_DRAIN
+	}
+
+	if resolved > MAX_EVENTS_PER_DRAIN {
+		log.Printf("MAX_EVENTS_PER_DRAIN (%d) is more than the %d rows one drain can delete, using %d",
+			resolved, MAX_EVENTS_PER_DRAIN, MAX_EVENTS_PER_DRAIN)
+		return MAX_EVENTS_PER_DRAIN
+	}
+
+	return resolved
 }
 
 // tokenEndpointFrom builds an org's token endpoint from its Apex REST URL.
@@ -398,6 +456,8 @@ func newBridge() (*Bridge, error) {
 		log.Printf("%s duration (%s) is less than the minimum of %s, using %s", "FLAG_POLL_INTERVAL", bridge.flagPollInterval, MIN_FLAG_POLL_INTERVAL, MIN_FLAG_POLL_INTERVAL)
 		bridge.flagPollInterval = MIN_FLAG_POLL_INTERVAL
 	}
+
+	bridge.maxEventsPerDrain = resolveMaxEventsPerDrain()
 
 	bridge.eventPushRetryDelay = EVENT_PUSH_RETRY_DELAY
 
@@ -883,7 +943,10 @@ func (bridge *Bridge) flushEvents(pushURI string, pollBytes []byte) {
 }
 
 func (bridge *Bridge) eventLoop() error {
-	pollURI := bridge.salesforceURL + "event"
+	// The parameter bounds what one drain reads and deletes. The org lowers it to the rows
+	// one transaction can delete, so this is a request rather than a guarantee. It rides on
+	// the URI, which also puts it in the poll log below.
+	pollURI := fmt.Sprintf("%sevent?%s=%d", bridge.salesforceURL, MAX_EVENTS_PARAM, bridge.maxEventsPerDrain)
 	pushURI := bridge.launchDarklyEventsURI + "/bulk"
 
 	// Pushes outlive the cycle that started them, so the loop cannot simply return while
