@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -115,32 +114,28 @@ func TestResolveMaxEventsPerDrain(t *testing.T) {
 	tests := []struct {
 		name  string
 		env   string
-		set   bool
 		unset bool
 		want  int
 	}{
 		{name: "unset uses the default", unset: true, want: MAX_EVENTS_PER_DRAIN},
-		{name: "blank uses the default", env: "", set: true, want: MAX_EVENTS_PER_DRAIN},
-		{name: "a value in range is honored", env: "250", set: true, want: 250},
-		{name: "the ceiling itself is honored", env: strconv.Itoa(MAX_EVENTS_PER_DRAIN), set: true, want: MAX_EVENTS_PER_DRAIN},
-		{name: "above the ceiling is lowered", env: "50000", set: true, want: MAX_EVENTS_PER_DRAIN},
-		{name: "zero uses the default", env: "0", set: true, want: MAX_EVENTS_PER_DRAIN},
-		{name: "negative uses the default", env: "-1", set: true, want: MAX_EVENTS_PER_DRAIN},
-		{name: "unparseable uses the default", env: "many", set: true, want: MAX_EVENTS_PER_DRAIN},
-		{name: "a float uses the default", env: "250.5", set: true, want: MAX_EVENTS_PER_DRAIN},
+		{name: "blank uses the default", env: "", want: MAX_EVENTS_PER_DRAIN},
+		{name: "a value in range is honored", env: "250", want: 250},
+		{name: "the ceiling itself is honored", env: strconv.Itoa(MAX_EVENTS_PER_DRAIN), want: MAX_EVENTS_PER_DRAIN},
+		{name: "above the ceiling is lowered", env: "50000", want: MAX_EVENTS_PER_DRAIN},
+		{name: "zero uses the default", env: "0", want: MAX_EVENTS_PER_DRAIN},
+		{name: "negative uses the default", env: "-1", want: MAX_EVENTS_PER_DRAIN},
+		{name: "unparseable uses the default", env: "many", want: MAX_EVENTS_PER_DRAIN},
+		{name: "a float uses the default", env: "250.5", want: MAX_EVENTS_PER_DRAIN},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if test.set {
-				t.Setenv("MAX_EVENTS_PER_DRAIN", test.env)
-			}
-
-			// Setenv first so the cleanup it registers restores whatever the
-			// environment running the tests happens to carry.
+			// Unset and blank are different cases: both resolve to the default, but
+			// only unset stands for a bridge that was never configured.
 			if test.unset {
-				t.Setenv("MAX_EVENTS_PER_DRAIN", "")
-				os.Unsetenv("MAX_EVENTS_PER_DRAIN")
+				unsetEnv(t, "MAX_EVENTS_PER_DRAIN")
+			} else {
+				setEnv(t, "MAX_EVENTS_PER_DRAIN", test.env)
 			}
 
 			if got := resolveMaxEventsPerDrain(); got != test.want {
