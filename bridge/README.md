@@ -68,6 +68,11 @@ export FLAG_POLL_INTERVAL='How often to poll LaunchDarkly for flag data'
 # such as: '5m'
 # if not set or unparseable, defaults to: '30s'
 # minimum is '30s'; anything shorter is clamped up to '30s'
+export MAX_EVENTS_PER_DRAIN='How many events one drain may take'
+# such as: '2000'
+# if not set, unparseable, zero, or negative, defaults to: '10000'
+# maximum is '10000'; anything larger is lowered to it
+# lower it if a drain runs out of Apex heap -- refer to "How many events one drain takes"
 ```
 
 ## Authentication
@@ -291,3 +296,14 @@ Whether a short interval is affordable therefore depends on your edition and lic
 count. On a large org a 1-second drain is a few percent of the allocation; on a small
 production org the same setting consumes most of the org's entire daily budget for this
 one integration, leaving little for everything else that calls the API.
+
+## How many events one drain takes
+
+Each drain asks the org for at most `MAX_EVENTS_PER_DRAIN` rows, and the org deletes
+exactly the rows it handed over. The default is 10,000, which is also the maximum: that is
+how many rows one Apex transaction can delete.
+
+Rows are not the only governor limit a drain has to fit inside. A transaction also has 6 MB
+of heap, and that depends on the size of your event payloads rather than their number. If
+drains start failing and the queue keeps growing, lower `MAX_EVENTS_PER_DRAIN`; the next
+poll recovers on its own.
