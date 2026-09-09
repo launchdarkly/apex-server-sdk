@@ -176,28 +176,10 @@ func TestInstanceIDsAreUniquePerInstance(t *testing.T) {
 	}
 }
 
-// restoreEnv arranges for name to be returned to its current value once the test
-// finishes. t.Setenv would handle this but requires Go 1.17, and CI builds the
-// bridge with Go 1.15.
-func restoreEnv(t *testing.T, name string) {
-	t.Helper()
-	previous, had := os.LookupEnv(name)
-	t.Cleanup(func() {
-		if had {
-			_ = os.Setenv(name, previous)
-		} else {
-			_ = os.Unsetenv(name)
-		}
-	})
-}
-
 // setEnv sets an environment variable for the duration of a test.
 func setEnv(t *testing.T, name, value string) {
 	t.Helper()
-	restoreEnv(t, name)
-	if err := os.Setenv(name, value); err != nil {
-		t.Fatalf("failed setting %s: %v", name, err)
-	}
+	t.Setenv(name, value)
 }
 
 // unsetEnv removes an environment variable for the duration of a test. This is
@@ -205,7 +187,7 @@ func setEnv(t *testing.T, name, value string) {
 // only the unset case reflects a bridge that was never configured at all.
 func unsetEnv(t *testing.T, name string) {
 	t.Helper()
-	restoreEnv(t, name)
+	t.Setenv(name, "")
 	if err := os.Unsetenv(name); err != nil {
 		t.Fatalf("failed unsetting %s: %v", name, err)
 	}

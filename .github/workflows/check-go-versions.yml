@@ -1,0 +1,16 @@
+name: Check Supported Go Versions
+on:
+  schedule:
+    - cron: "0 17 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check-go-versions:
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: launchdarkly/gh-actions/.github/workflows/sdk-go-versions.yml@main
+    with:
+      branches: '["main"]'
