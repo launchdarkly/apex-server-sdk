@@ -53,6 +53,8 @@ export LD_SCOPE_KEY='A name for this project and environment'
 # project and environment pair sharing the org needs its own value
 # if not set, the bridge owns records that carry no scope
 # refer to "Scoping an org" below -- the Apex client must use the same value
+# surrounding whitespace is trimmed, and a value holding a newline or other control
+# character is refused at startup, the same as LD_SDK_KEY
 export OAUTH_URI='YOUR OAUTH URI'
 # if not set, defaults to: 'https://login.salesforce.com/services/oauth2/token'
 # if authenticating against sandbox, use: 'https://test.salesforce.com/services/oauth2/token'

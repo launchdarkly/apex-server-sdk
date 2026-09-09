@@ -238,26 +238,39 @@ func resolveMaxEventsPerDrain() int {
 	return resolved
 }
 
-// resolveSDKKey reads LD_SDK_KEY and reports whether it can be used.
+// resolveHeaderEnv reads name, trims it, and reports whether the result can be sent as an
+// HTTP header value.
 //
-// The value is trimmed. A key read from a file or a secret mount often arrives with a
-// trailing newline, and LD_SCOPE_KEY is trimmed for the same reason.
+// LD_SDK_KEY and LD_SCOPE_KEY both travel to their service in a header and both come from
+// an operator's environment, so one function answers for both. Trimming comes first
+// because a value read from a file or a secret mount usually arrives with a trailing
+// newline, and that value is correct.
 //
-// A key that still holds a character no header can carry is refused here rather than at
-// the first request. net/http rejects such a header itself, but some Go versions quote the
-// offending value in the error, and the bridge logs that error -- which writes the SDK key
-// to the log. Refusing at startup keeps the key out of every message, names the variable
-// instead of its value, and fails while an operator is still watching.
+// What is left is refused here rather than at the first request. net/http rejects such a
+// header itself, but some Go versions quote the offending value in the error, and the
+// bridge logs that error -- which writes the value to the log. Refusing at startup keeps it
+// out of every message, names the variable instead of its value, and fails while an
+// operator is still watching.
+func resolveHeaderEnv(name string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+
+	if !isSendableHeaderValue(value) {
+		return "", errors.New(name + " holds a character that cannot be sent in an HTTP " +
+			"header; check it for a newline or other control character")
+	}
+
+	return value, nil
+}
+
+// resolveSDKKey reads LD_SDK_KEY, which is required.
 func resolveSDKKey() (string, error) {
-	key := strings.TrimSpace(os.Getenv("LD_SDK_KEY"))
+	key, err := resolveHeaderEnv("LD_SDK_KEY")
+	if err != nil {
+		return "", err
+	}
 
 	if key == "" {
 		return "", errors.New("LD_SDK_KEY not set")
-	}
-
-	if !isSendableHeaderValue(key) {
-		return "", errors.New("LD_SDK_KEY holds a character that cannot be sent in an " +
-			"HTTP header; check it for a newline or other control character")
 	}
 
 	return key, nil
@@ -511,7 +524,16 @@ func newBridge() (*Bridge, error) {
 	// into without changing anything. Logged either way, because a mismatch against the
 	// Apex-side scope key produces no error -- evaluation simply finds no flag data and
 	// every variation returns its fallback.
-	bridge.scopeKey = strings.TrimSpace(os.Getenv("LD_SCOPE_KEY"))
+	//
+	// A value this bridge cannot send in a header stops startup rather than reading as
+	// unset. Falling back to unscoped would quietly move this bridge onto another set of
+	// records, and the comment above is why that would go unnoticed.
+	scopeKey, err := resolveHeaderEnv("LD_SCOPE_KEY")
+	if err != nil {
+		return nil, err
+	}
+
+	bridge.scopeKey = scopeKey
 	if bridge.scopeKey == "" {
 		log.Print("LD_SCOPE_KEY is not set, scoping to records with no scope")
 	} else {

@@ -126,3 +126,49 @@ func TestIsSendableHeaderValueMatchesNetHTTP(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveHeaderEnvTrimsAndRefusesForEveryVariable covers the shared rule on both
+// variables that use it, so the two cannot drift apart. LD_SDK_KEY layers a required-ness
+// check on top; the trimming and the header rule are the same for each.
+func TestResolveHeaderEnvTrimsAndRefusesForEveryVariable(t *testing.T) {
+	for _, name := range []string{"LD_SDK_KEY", "LD_SCOPE_KEY"} {
+		const value = "gps-production"
+
+		setEnv(t, name, "  "+value+"\n")
+
+		got, err := resolveHeaderEnv(name)
+		if err != nil {
+			t.Fatalf("resolveHeaderEnv(%q) returned %v, want the trimmed value", name, err)
+		}
+		if got != value {
+			t.Errorf("resolveHeaderEnv(%q) = %q, want %q", name, got, value)
+		}
+
+		setEnv(t, name, value+"\nX-Injected: 1")
+
+		_, err = resolveHeaderEnv(name)
+		if err == nil {
+			t.Fatalf("resolveHeaderEnv(%q) accepted an embedded newline", name)
+		}
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error for %q does not name the variable: %v", name, err)
+		}
+		if strings.Contains(err.Error(), value) {
+			t.Errorf("error for %q repeats the value: %v", name, err)
+		}
+	}
+}
+
+// An empty LD_SCOPE_KEY is a supported configuration, not a failure: it means this bridge
+// owns the records that carry no scope. Only LD_SDK_KEY treats empty as an error.
+func TestResolveHeaderEnvAllowsAnEmptyValue(t *testing.T) {
+	setEnv(t, "LD_SCOPE_KEY", "  \n")
+
+	got, err := resolveHeaderEnv("LD_SCOPE_KEY")
+	if err != nil {
+		t.Fatalf("resolveHeaderEnv returned %v, want an empty scope", err)
+	}
+	if got != "" {
+		t.Errorf("resolveHeaderEnv = %q, want the empty string", got)
+	}
+}
