@@ -238,6 +238,53 @@ func resolveMaxEventsPerDrain() int {
 	return resolved
 }
 
+// resolveSDKKey reads LD_SDK_KEY and reports whether it can be used.
+//
+// The value is trimmed. A key read from a file or a secret mount often arrives with a
+// trailing newline, and LD_SCOPE_KEY is trimmed for the same reason.
+//
+// A key that still holds a character no header can carry is refused here rather than at
+// the first request. net/http rejects such a header itself, but some Go versions quote the
+// offending value in the error, and the bridge logs that error -- which writes the SDK key
+// to the log. Refusing at startup keeps the key out of every message, names the variable
+// instead of its value, and fails while an operator is still watching.
+func resolveSDKKey() (string, error) {
+	key := strings.TrimSpace(os.Getenv("LD_SDK_KEY"))
+
+	if key == "" {
+		return "", errors.New("LD_SDK_KEY not set")
+	}
+
+	if !isSendableHeaderValue(key) {
+		return "", errors.New("LD_SDK_KEY holds a character that cannot be sent in an " +
+			"HTTP header; check it for a newline or other control character")
+	}
+
+	return key, nil
+}
+
+// isSendableHeaderValue reports whether v can be sent as an HTTP header value.
+//
+// This is the rule net/http applies: a control character is refused, except the tab that
+// linear whitespace allows. It is repeated here rather than taken from x/net/httpguts to
+// avoid a dependency for one predicate, and because the point is to answer the question
+// before net/http does.
+func isSendableHeaderValue(v string) bool {
+	for i := 0; i < len(v); i++ {
+		b := v[i]
+
+		if b == '\t' {
+			continue
+		}
+
+		if b < ' ' || b == 0x7f {
+			return false
+		}
+	}
+
+	return true
+}
+
 // tokenEndpointFrom builds an org's token endpoint from its Apex REST URL.
 //
 // The client credentials grant is only accepted on the org's own domain; the shared
@@ -297,10 +344,11 @@ func (bridge *Bridge) initFlushControls() {
 func newBridge() (*Bridge, error) {
 	var bridge Bridge
 
-	bridge.launchDarklyKey = os.Getenv("LD_SDK_KEY")
-	if bridge.launchDarklyKey == "" {
-		return nil, errors.New("LD_SDK_KEY not set")
+	sdkKey, err := resolveSDKKey()
+	if err != nil {
+		return nil, err
 	}
+	bridge.launchDarklyKey = sdkKey
 
 	bridge.salesforceURL = os.Getenv("SALESFORCE_URL")
 	if bridge.salesforceURL == "" {

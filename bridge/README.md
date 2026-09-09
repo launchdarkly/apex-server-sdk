@@ -14,6 +14,8 @@ prefer for a new deployment.
 # required configuration options
 export LD_SDK_KEY='Your LaunchDarkly SDK key'
 # such as: 'sdk-36f084b0-a57b-42a6-831e-1e20b7631b92'
+# surrounding whitespace is trimmed, so a key read from a file keeps working
+# a key holding a newline or other control character is refused at startup
 export SALESFORCE_URL='Your Salesforce Apex REST URL'
 # such as: 'https://na123.salesforce.com/services/apexrest/'
 # both the host and the path have to be right, and the host authenticates as well under
