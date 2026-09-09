@@ -113,19 +113,10 @@ const (
 	// when LD_SCOPE_KEY is configured, which keeps a bridge that has not opted in
 	// indistinguishable from one running an older version.
 	SCOPE_HEADER = "LD-Scope-Key"
-	// MAX_EVENTS_PARAM is the query parameter that tells the org how many events one
-	// drain may read and delete, and MAX_EVENTS_PER_DRAIN is what the bridge asks for
-	// when the environment variable of the same name is unset.
-	//
-	// 10,000 is the most rows one Apex transaction can delete, and a drain deletes
-	// exactly the rows it read. The org enforces the same ceiling and lowers anything
-	// above it, so this copy is advisory: when the two sides are versioned apart, the
-	// org's number is the one that holds.
-	//
-	// A row count cannot bound the heap a drain needs, which follows total payload
-	// bytes rather than rows. An org that carries large flag values or user attributes
-	// lowers MAX_EVENTS_PER_DRAIN until the drain fits, with no new release of either
-	// side.
+	// MAX_EVENTS_PARAM bounds how many events one drain reads and deletes, and
+	// MAX_EVENTS_PER_DRAIN is what the bridge asks for by default. 10,000 is the rows
+	// one Apex transaction can delete, and a drain deletes exactly the rows it read.
+	// The org enforces the same ceiling, so the value sent is a request.
 	MAX_EVENTS_PARAM     = "maxEvents"
 	MAX_EVENTS_PER_DRAIN = 10000
 )

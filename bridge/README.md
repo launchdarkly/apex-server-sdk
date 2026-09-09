@@ -299,20 +299,11 @@ one integration, leaving little for everything else that calls the API.
 
 ## How many events one drain takes
 
-Each drain asks the org for at most `MAX_EVENTS_PER_DRAIN` rows, sends them to
-LaunchDarkly, and the org deletes exactly the rows it handed over. The default is 10,000
-and that is also the maximum; a larger value is lowered to it and the startup log says so.
+Each drain asks the org for at most `MAX_EVENTS_PER_DRAIN` rows, and the org deletes
+exactly the rows it handed over. The default is 10,000, which is also the maximum: that is
+how many rows one Apex transaction can delete.
 
-The maximum is a Salesforce governor limit on how many rows one Apex transaction can
-delete, and the drain runs in one transaction.
-
-**A row count cannot bound everything.** A transaction also has 6 MB of heap, and the heap
-a drain needs follows the total size of the event payloads rather than the number of rows.
-How many rows fit in 6 MB depends on what your flag values and user attributes look like,
-which neither the bridge nor the SDK can know for you. If the bridge logs a poll that keeps
-failing and the queue keeps growing, lower `MAX_EVENTS_PER_DRAIN` until the drain fits. The
-next poll then recovers on its own, and the table shrinks with every drain after that.
-
-A value the bridge cannot use is treated as unset, matching the poll intervals: unset,
-empty, unparseable, zero and negative all fall back to the default, and the value actually
-in effect is logged at startup. Check that log after changing it.
+Rows are not the only governor limit a drain has to fit inside. A transaction also has 6 MB
+of heap, and that depends on the size of your event payloads rather than their number. If
+drains start failing and the queue keeps growing, lower `MAX_EVENTS_PER_DRAIN`; the next
+poll recovers on its own.
