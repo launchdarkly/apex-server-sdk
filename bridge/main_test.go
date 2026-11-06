@@ -37,7 +37,7 @@ func newTestBridge(t *testing.T, baseURI, eventsURI string) *Bridge {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	bridge := &Bridge{
-		client:                http.Client{},
+		restClient:            http.Client{},
 		salesforceURL:         "http://salesforce.invalid/",
 		launchDarklyKey:       "fake-sdk-key",
 		launchDarklyBaseURI:   baseURI,
@@ -63,6 +63,19 @@ func newTestBridge(t *testing.T, baseURI, eventsURI string) *Bridge {
 	// eventLoop takes a flush slot before every drain, so a bridge built without them
 	// never drains at all.
 	bridge.initFlushControls()
+
+	// Streaming is off here, matching the poll-driven tests this helper predates; tests
+	// of the stream turn it on. The stream state is prepared regardless so a test that
+	// does so has a client and a wake-up channel. The delays are short but positive:
+	// a zero reconnect delay would reconnect with no delay at all, and a zero read
+	// timeout means no timeout at all. The floor between pushes is zero, so a test can
+	// drive one change after another without waiting; tests of the floor set their own.
+	bridge.initDataStream(0)
+	bridge.streamInitialReconnectDelay = time.Millisecond
+	bridge.streamExtendedRetryDelay = time.Millisecond
+	bridge.streamReadTimeout = STREAM_READ_TIMEOUT
+	bridge.dataPushRetryDelay = time.Millisecond
+	bridge.dataPushMinInterval = 0
 
 	return bridge
 }
@@ -206,7 +219,7 @@ func setMinimalBridgeEnv(t *testing.T) {
 	setEnv(t, "OAUTH_USERNAME", "test@example.invalid")
 	setEnv(t, "OAUTH_PASSWORD", "test-password")
 	setEnv(t, "OAUTH_SECRET", "test-secret")
-	for _, name := range []string{"OAUTH_JWT_KEY", "OAUTH_URI", "HTTP_TIMEOUT", "LD_BASE_URI", "LD_EVENTS_URI", "OAUTH_GRANT_TYPE", "LD_SCOPE_KEY"} {
+	for _, name := range []string{"OAUTH_JWT_KEY", "OAUTH_URI", "HTTP_TIMEOUT", "LD_BASE_URI", "LD_EVENTS_URI", "LD_STREAM_URI", "OAUTH_GRANT_TYPE", "LD_SCOPE_KEY", "FLAG_STREAMING", "STREAM_INITIAL_RECONNECT_DELAY", "STREAM_MIN_PUSH_INTERVAL"} {
 		unsetEnv(t, name)
 	}
 }
@@ -1710,7 +1723,7 @@ func TestAuthorizeSalesforceRejectsAnUnresolvedGrant(t *testing.T) {
 
 	// The underscored spelling is the shape of the drift worth catching: it is the OAuth
 	// wire value, and resolveGrantType rejects it as OAUTH_GRANT_TYPE.
-	bridge := &Bridge{client: http.Client{}, oauthGrantType: "client_credentials", oauthURI: *endpoint}
+	bridge := &Bridge{restClient: http.Client{}, oauthGrantType: "client_credentials", oauthURI: *endpoint}
 
 	err, permanent := bridge.authorizeSalesforce()
 	if err == nil {
