@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -23,16 +24,22 @@ import (
 // events follow, one per changed item.
 //
 // The org cannot take an item at a time. Its store endpoint replaces a scope's flag data
-// wholesale, so the bridge keeps its own copy of the environment in flagStore, applies each
-// event to that, and pushes the whole set -- the same payload a poll would have pushed.
-// The Apex side needs no change to be fed by the stream, which keeps either upgrade order
-// safe.
+// wholesale, so the bridge keeps its own copy of the environment in dataStore, applies
+// each event to that, and pushes the whole set -- the same payload a poll would have
+// pushed. The Apex side needs no change to be fed by the stream, which keeps either
+// upgrade order safe.
 //
 // The push runs on its own goroutine, apart from the goroutine reading the stream, and it
 // retries on its own schedule. That is what makes a Salesforce outage survivable under
 // streaming. A poll has a next cycle to try again on, and a stream does not: with no
 // retry, a change that arrived during the outage would be lost until the flag changed
 // again.
+//
+// The push is also rate limited. LaunchDarkly sends one event per changed item, so a
+// script that touches 300 flags arrives as 300 patches over a few seconds, and every
+// push is an inbound Salesforce API call that counts against the org's 24-hour
+// allocation. Pushes are therefore at least STREAM_MIN_PUSH_INTERVAL apart, with every
+// change that lands in between folded into the next one.
 
 const (
 	// The event names the stream uses. Anything else is ignored, so a new event type the
@@ -52,43 +59,55 @@ const (
 	// tests can shorten it.
 	STREAM_READ_TIMEOUT = 5 * time.Minute
 	// STREAM_MAX_RETRY_DELAY caps the exponential backoff between reconnection attempts,
-	// STREAM_RETRY_RESET_INTERVAL is how long a connection has to stay up before the
-	// backoff starts over at the initial delay, and STREAM_JITTER_RATIO is how much of
-	// each delay is randomly shaved off so a fleet of bridges does not reconnect in step
-	// after an outage. All three match the other LaunchDarkly server SDKs.
+	// STREAM_RETRY_RESET_INTERVAL is how long the stream has to go without a failure
+	// before the backoff starts over at the initial delay, and STREAM_JITTER_RATIO is how
+	// much of each delay is randomly shaved off so a fleet of bridges does not reconnect
+	// in step after an outage. All three match the other LaunchDarkly server SDKs.
 	STREAM_MAX_RETRY_DELAY      = 30 * time.Second
 	STREAM_RETRY_RESET_INTERVAL = 60 * time.Second
 	STREAM_JITTER_RATIO         = 0.5
-	// FLAG_PUSH_RETRY_DELAY is how long flagPushLoop waits before it retries a push the
-	// org refused or that never arrived, and FLAG_PUSH_MAX_RETRY_DELAY is where the
-	// doubling stops. The cap equals the default poll interval, so a bridge retrying
-	// against a Salesforce outage costs the org no more API calls than polling did.
+	// STREAM_EXTENDED_RETRY_DELAY and STREAM_EXTENDED_MAX_RETRY_DELAY are the backoff
+	// used after a status a retry is unlikely to change: a 401 or 403 for the SDK key, or
+	// a 404 for the path. The stream is never given up on -- the SDK key may be
+	// re-enabled, or the proxy that answered 404 may be fixed -- but asking again every
+	// few seconds would be pointless, so these attempts are minutes apart instead.
+	//
+	// The initial delay seeds a Bridge field rather than being read where the stream is
+	// opened, so tests can shorten it.
+	STREAM_EXTENDED_RETRY_DELAY     = 5 * time.Minute
+	STREAM_EXTENDED_MAX_RETRY_DELAY = 1 * time.Hour
+	// DATA_PUSH_RETRY_DELAY is how long dataPushLoop first waits before it retries a
+	// push the org refused or that never arrived, and DATA_PUSH_MAX_RETRY_DELAY is where
+	// the doubling stops. A retry is a push like any other, so it also never comes sooner
+	// than STREAM_MIN_PUSH_INTERVAL after the attempt before it; these only matter when
+	// that interval has been set below them.
 	//
 	// The initial delay seeds a Bridge field rather than being read where the push
 	// happens, so tests can shorten it.
-	FLAG_PUSH_RETRY_DELAY     = 1 * time.Second
-	FLAG_PUSH_MAX_RETRY_DELAY = 30 * time.Second
+	DATA_PUSH_RETRY_DELAY     = 1 * time.Second
+	DATA_PUSH_MAX_RETRY_DELAY = 30 * time.Second
 )
 
-// flagStore is the bridge's copy of the environment's flag data while streaming.
+// dataStore is the bridge's copy of the environment's flag data while streaming: every
+// flag and every segment, by kind and key.
 //
 // It exists because the org's store endpoint has no way to change one item. The stream
 // delivers items one at a time, so the bridge applies each change here and pushes the
 // whole set.
-type flagStore struct {
+type dataStore struct {
 	mu sync.Mutex
 	// kinds maps a kind -- "flags" or "segments" -- to its items by key. Kinds are kept
 	// under the names LaunchDarkly uses, so the payload snapshot builds has the same
 	// shape as the poll response the org already accepts.
-	kinds map[string]map[string]flagItem
+	kinds map[string]map[string]versionedItem
 	// initialized reports whether a put has arrived. A patch or delete that somehow
 	// precedes one is ignored, because a set assembled from patches alone is incomplete,
 	// and pushing it would replace whatever complete set the org holds.
 	initialized bool
 }
 
-// flagItem is one flag or segment, or the record of one having been deleted.
-type flagItem struct {
+// versionedItem is one flag or segment, or the record of one having been deleted.
+type versionedItem struct {
 	version int
 	// raw is the item exactly as LaunchDarkly sent it, forwarded without being decoded
 	// into a model the bridge would then have to keep up to date. It is nil for a
@@ -102,18 +121,18 @@ type flagItem struct {
 // Every item has to parse as a JSON object with a version, because a patch that follows
 // is ordered against that version. An item that does not is reported as an error, which
 // the caller treats as a malformed event.
-func (store *flagStore) replace(kinds map[string]map[string]json.RawMessage) error {
-	replacement := make(map[string]map[string]flagItem, len(kinds))
+func (store *dataStore) replace(kinds map[string]map[string]json.RawMessage) error {
+	replacement := make(map[string]map[string]versionedItem, len(kinds))
 
 	for kind, items := range kinds {
-		replacement[kind] = make(map[string]flagItem, len(items))
+		replacement[kind] = make(map[string]versionedItem, len(items))
 
 		for key, raw := range items {
 			version, err := versionOf(raw)
 			if err != nil {
 				return fmt.Errorf("%s %q: %w", kind, key, err)
 			}
-			replacement[kind][key] = flagItem{version: version, raw: raw}
+			replacement[kind][key] = versionedItem{version: version, raw: raw}
 		}
 	}
 
@@ -134,7 +153,7 @@ func (store *flagStore) replace(kinds map[string]map[string]json.RawMessage) err
 // already accounted for. Equal versions are also declined, which is what makes a
 // redelivered event harmless. This matches the versioned upsert in every other
 // LaunchDarkly server SDK store.
-func (store *flagStore) upsert(kind, key string, item flagItem) bool {
+func (store *dataStore) upsert(kind, key string, item versionedItem) bool {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -144,7 +163,7 @@ func (store *flagStore) upsert(kind, key string, item flagItem) bool {
 
 	items, ok := store.kinds[kind]
 	if !ok {
-		items = make(map[string]flagItem)
+		items = make(map[string]versionedItem)
 		store.kinds[kind] = items
 	}
 
@@ -160,7 +179,7 @@ func (store *flagStore) upsert(kind, key string, item flagItem) bool {
 // snapshot serializes what the store holds into the payload the org's store endpoint
 // accepts: each kind's live items by key, with deleted items left out. Each item is
 // written as LaunchDarkly sent it.
-func (store *flagStore) snapshot() ([]byte, error) {
+func (store *dataStore) snapshot() ([]byte, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -184,7 +203,7 @@ func (store *flagStore) snapshot() ([]byte, error) {
 // canonicalJSON rewrites a JSON document so that two documents with the same content
 // come out byte-for-byte equal, whatever order their object keys arrived in.
 //
-// flagPushLoop compares snapshots through this rather than directly, because LaunchDarkly
+// dataPushLoop compares snapshots through this rather than directly, because LaunchDarkly
 // does not serialize an item the same way on every connection: the same flag arrives with
 // its nested fields in a different order from one put to the next, so the bytes of two
 // snapshots differ when the content does not. The payload pushed to the org is still the
@@ -206,7 +225,7 @@ func canonicalJSON(document []byte) ([]byte, error) {
 }
 
 // count reports how many live items of one kind the store holds. It is for log lines.
-func (store *flagStore) count(kind string) int {
+func (store *dataStore) count(kind string) int {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -258,38 +277,44 @@ func parseStreamPath(path string) (kind, key string, ok bool) {
 
 // newStreamClient builds the HTTP client the stream connection uses.
 //
-// It is a separate client from the one every other request uses, because
-// http.Client.Timeout bounds the whole exchange, body included, and a stream's body
-// never ends: HTTP_TIMEOUT would cut every connection off after thirty seconds. What a
-// stream needs bounded is the connection and the wait for response headers, so
-// HTTP_TIMEOUT is applied to those instead. Silence after the headers is
-// STREAM_READ_TIMEOUT's job.
+// It is a separate client from restClient, because http.Client.Timeout bounds the whole
+// exchange, body included, and a stream's body never ends: HTTP_TIMEOUT would cut every
+// connection off after thirty seconds. What a stream needs bounded is getting connected
+// -- the TCP dial, the TLS handshake, and the wait for response headers -- so
+// HTTP_TIMEOUT is applied to each of those instead. A connect that hangs in any of them
+// fails within HTTP_TIMEOUT, as every other request the bridge makes does. Silence after
+// the headers is STREAM_READ_TIMEOUT's job.
 //
 // The transport is a copy of the default one, so proxy settings from the environment
-// and the dial and TLS handshake timeouts carry over.
+// carry over. With HTTP_TIMEOUT set to zero its dial and handshake timeouts carry over
+// as well, since zero means no timeout for restClient and a stream that could never
+// fail to connect would be worse than one that takes the default's thirty seconds.
 func newStreamClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if timeout > 0 {
+		dialer := &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
+		transport.DialContext = dialer.DialContext
+		transport.TLSHandshakeTimeout = timeout
 		transport.ResponseHeaderTimeout = timeout
 	}
 
 	return &http.Client{Transport: transport}
 }
 
-// initFlagStream prepares the state streaming needs. newBridge and the test helper both
+// initDataStream prepares the state streaming needs. newBridge and the test helper both
 // call it, so the channel's capacity has one definition.
-func (bridge *Bridge) initFlagStream(httpTimeout time.Duration) {
+func (bridge *Bridge) initDataStream(httpTimeout time.Duration) {
 	// Capacity one. A signal that is already pending says everything a second one
 	// would, because the push reads the store rather than the signal.
-	bridge.flagsChanged = make(chan struct{}, 1)
+	bridge.dataChanged = make(chan struct{}, 1)
 	bridge.streamClient = newStreamClient(httpTimeout)
 }
 
-// notifyFlagsChanged wakes flagPushLoop. It never blocks: a signal already waiting
+// notifyDataChanged wakes dataPushLoop. It never blocks: a signal already waiting
 // covers this change as well, since the push snapshots the store when it runs.
-func (bridge *Bridge) notifyFlagsChanged() {
+func (bridge *Bridge) notifyDataChanged() {
 	select {
-	case bridge.flagsChanged <- struct{}{}:
+	case bridge.dataChanged <- struct{}{}:
 	default:
 	}
 }
@@ -299,8 +324,15 @@ func (bridge *Bridge) notifyFlagsChanged() {
 //
 // The eventsource library owns the connection: it reconnects with backoff, honors a
 // retry delay the server sends, and gives up the connection after STREAM_READ_TIMEOUT
-// of silence. What is decided here is which failures are worth retrying, and what each
-// event does to the store.
+// of silence. What is decided here is how quickly each kind of failure is retried, and
+// what each event does to the store.
+//
+// No HTTP response ends the stream. A long-running component that stopped for good on a
+// status would need an operator to notice and restart it, and stopping flag delivery
+// would take event delivery down with it, since the two loops share one daemon. A
+// status a retry cannot change -- a refused SDK key, a path the service does not serve
+// -- moves the reconnects onto a slower schedule instead, which is what the other
+// LaunchDarkly server SDKs do.
 func (bridge *Bridge) streamLoop() error {
 	streamURI := bridge.launchDarklyStreamURI + STREAM_PATH
 
@@ -323,51 +355,44 @@ func (bridge *Bridge) streamLoop() error {
 	// reading events, and so that changes arriving during a push fold into the next one.
 	// It stops when the context ends, which every exit below arranges.
 	pushDone := make(chan error, 1)
-	go func() { pushDone <- bridge.flagPushLoop() }()
+	go func() { pushDone <- bridge.dataPushLoop() }()
 
-	// fatal is set by the error handler, which the library calls on its own goroutine,
-	// and read once the stream has closed.
-	var fatalLock sync.Mutex
-	var fatal error
-	setFatal := func(err error) {
-		fatalLock.Lock()
-		defer fatalLock.Unlock()
-		if fatal == nil {
-			fatal = err
-		}
-	}
-	getFatal := func() error {
-		fatalLock.Lock()
-		defer fatalLock.Unlock()
-		return fatal
-	}
+	// The slower reconnect schedule. Its ceiling is fixed, but its first delay comes
+	// from a Bridge field so tests can shorten it. The jitter is inherited from the
+	// default profile.
+	extended := es.NewRetryProfile(
+		es.RetryProfileBaseDelay(bridge.streamExtendedRetryDelay),
+		es.RetryProfileMaxDelay(STREAM_EXTENDED_MAX_RETRY_DELAY),
+	)
 
-	// The handler decides whether a failed connection is retried. The division matches
-	// isHTTPErrorRecoverable, so the stream gives up on exactly the statuses the event
+	// The handler decides how soon a failed connection is retried. The division matches
+	// isHTTPErrorRecoverable, so the stream slows down on exactly the statuses the event
 	// push gives up on: a rejected SDK key or a path the service does not serve answers
 	// the same on every attempt, while a 5xx, a rate limit, or a dropped connection may
-	// not.
+	// not. A recoverable failure after an unrecoverable one is new information -- the
+	// service is answering differently -- and puts the normal schedule back.
 	errorHandler := func(err error) es.StreamErrorHandlerResult {
 		var refused es.SubscriptionError
 		if errors.As(err, &refused) {
 			if !isHTTPErrorRecoverable(refused.Code) {
 				if refused.Code == 401 || refused.Code == 403 {
-					log.Printf("the LaunchDarkly stream refused the SDK key with HTTP %d, giving up", refused.Code)
-					setFatal(errors.New("requesting flags unauthorized"))
+					log.Printf("the LaunchDarkly stream refused the SDK key with HTTP %d; check LD_SDK_KEY. "+
+						"Retrying no sooner than %s from now, and at most every %s after that",
+						refused.Code, bridge.streamExtendedRetryDelay, STREAM_EXTENDED_MAX_RETRY_DELAY)
 				} else {
-					log.Printf("the LaunchDarkly stream answered HTTP %d, which a retry cannot fix; "+
-						"check LD_STREAM_URI: %s", refused.Code, streamURI)
-					setFatal(fmt.Errorf("the LaunchDarkly stream answered HTTP %d", refused.Code))
+					log.Printf("the LaunchDarkly stream answered HTTP %d, which a retry is unlikely to fix; "+
+						"check LD_STREAM_URI: %s. Retrying no sooner than %s from now, and at most every %s after that",
+						refused.Code, streamURI, bridge.streamExtendedRetryDelay, STREAM_EXTENDED_MAX_RETRY_DELAY)
 				}
-				return es.StreamErrorHandlerResult{CloseNow: true}
+				return es.StreamErrorHandlerResult{ActivateProfile: extended}
 			}
 
 			log.Printf("the LaunchDarkly stream answered HTTP %d, will retry", refused.Code)
-			return es.StreamErrorHandlerResult{}
+			return es.StreamErrorHandlerResult{ActivateProfile: es.DefaultProfile}
 		}
 
 		log.Print("the LaunchDarkly stream connection failed: ", err, ", will retry")
-		return es.StreamErrorHandlerResult{}
+		return es.StreamErrorHandlerResult{ActivateProfile: es.DefaultProfile}
 	}
 
 	log.Print("connecting to the LaunchDarkly stream at: " + streamURI)
@@ -379,6 +404,7 @@ func (bridge *Bridge) streamLoop() error {
 		es.StreamOptionUseBackoff(STREAM_MAX_RETRY_DELAY),
 		es.StreamOptionUseJitter(STREAM_JITTER_RATIO),
 		es.StreamOptionRetryResetInterval(STREAM_RETRY_RESET_INTERVAL),
+		es.StreamOptionRegisterRetryProfile(extended),
 		es.StreamOptionErrorHandler(errorHandler),
 		// A negative timeout retries the first connection for as long as it takes. A
 		// bridge started during a LaunchDarkly outage then connects when the outage ends,
@@ -387,11 +413,11 @@ func (bridge *Bridge) streamLoop() error {
 		es.StreamOptionLogger(log.Default()),
 	)
 	if err != nil {
-		// With the first connection retried indefinitely, only two things end the
-		// attempt: the handler giving up, which set fatal, and the context ending, which
-		// did not.
+		// With the first connection retried indefinitely and no status ending the
+		// stream, only the context ending gets here. The push loop is told the same
+		// way, and reports any failure of its own.
 		bridge.cancel()
-		return firstError(getFatal(), <-pushDone)
+		return <-pushDone
 	}
 	defer stream.Close()
 
@@ -400,12 +426,11 @@ func (bridge *Bridge) streamLoop() error {
 		case event, ok := <-stream.Events:
 			if !ok {
 				// The library closes the channel once the stream is over, which it is
-				// for one of two reasons: the handler gave up, or the context ended. A
-				// third reason would be a defect, and is named rather than taken for a
-				// clean stop, because featureLoop returning nil ends flag delivery
-				// quietly.
-				closed := getFatal()
-				if closed == nil && bridge.context.Err() == nil {
+				// for one reason: the context ended. Another reason would be a defect,
+				// and is named rather than taken for a clean stop, because featureLoop
+				// returning nil ends flag delivery quietly.
+				var closed error
+				if bridge.context.Err() == nil {
 					closed = errors.New("the LaunchDarkly stream closed unexpectedly")
 				}
 				bridge.cancel()
@@ -480,13 +505,13 @@ func (bridge *Bridge) applyPut(data []byte) error {
 		return errors.New("put event has no data")
 	}
 
-	if err := bridge.flags.replace(put.Data); err != nil {
+	if err := bridge.dataStore.replace(put.Data); err != nil {
 		return err
 	}
 
 	log.Printf("received %d flags and %d segments from the LaunchDarkly stream",
-		bridge.flags.count("flags"), bridge.flags.count("segments"))
-	bridge.notifyFlagsChanged()
+		bridge.dataStore.count("flags"), bridge.dataStore.count("segments"))
+	bridge.notifyDataChanged()
 
 	return nil
 }
@@ -520,14 +545,14 @@ func (bridge *Bridge) applyPatch(data []byte) error {
 		return err
 	}
 
-	if !bridge.flags.upsert(kind, key, flagItem{version: version, raw: patch.Data}) {
+	if !bridge.dataStore.upsert(kind, key, versionedItem{version: version, raw: patch.Data}) {
 		log.Printf("ignoring a patch to %s %q at version %d, which is not newer than what is held",
 			kind, key, version)
 		return nil
 	}
 
 	log.Printf("the LaunchDarkly stream updated %s %q to version %d", kind, key, version)
-	bridge.notifyFlagsChanged()
+	bridge.notifyDataChanged()
 
 	return nil
 }
@@ -558,48 +583,60 @@ func (bridge *Bridge) applyDelete(data []byte) error {
 		return nil
 	}
 
-	if !bridge.flags.upsert(kind, key, flagItem{version: *deletion.Version}) {
+	if !bridge.dataStore.upsert(kind, key, versionedItem{version: *deletion.Version}) {
 		log.Printf("ignoring a delete of %s %q at version %d, which is not newer than what is held",
 			kind, key, *deletion.Version)
 		return nil
 	}
 
 	log.Printf("the LaunchDarkly stream deleted %s %q at version %d", kind, key, *deletion.Version)
-	bridge.notifyFlagsChanged()
+	bridge.notifyDataChanged()
 
 	return nil
 }
 
-// flagPushLoop delivers the store to the org whenever it changes, and keeps trying until
+// dataPushLoop delivers the store to the org whenever it changes, and keeps trying until
 // it has.
 //
-// It coalesces. The push sends a snapshot of the whole store, so ten patches that arrive
-// during one push cost one more push, not ten, and a change that lands while a failed
-// push is waiting to be retried goes out in the retry instead of after it.
+// It paces itself. Pushes are never closer together than dataPushMinInterval, and a
+// push that failed is not retried sooner than the backoff says, however many changes
+// arrive in the meantime. Every change that lands while the loop is waiting is folded
+// into the push that follows, so the interval is a ceiling on how many Salesforce API
+// calls the loop can make, not a delay on each change: a change in a quiet period goes
+// out at once, and the three hundred patches of a bulk edit go out as one or two
+// pushes.
 //
 // It also declines to push what the org already has. Every reconnect opens with a put,
 // and after a brief network interruption that put carries what the last push carried. A
 // snapshot whose content matches the last successful push is dropped, so a flapping
 // connection costs LaunchDarkly a reconnect and the org nothing. The comparison is by
 // content rather than bytes; refer to canonicalJSON for why that distinction matters.
+// After a failed push the comparison is suspended, because the bridge no longer knows
+// what the org holds: a push that timed out on this side may have been committed on
+// that one, and if the data then goes back to what was last pushed, that has to be
+// pushed again.
 //
 // It returns nil when the bridge shuts down. A failure no retry can fix -- Salesforce
 // rejecting the credential on a refresh, or a push URI that cannot be built -- ends the
 // daemon: the loop cancels the context and returns the error, and streamLoop reports it.
-func (bridge *Bridge) flagPushLoop() error {
+func (bridge *Bridge) dataPushLoop() error {
 	pushURI := bridge.salesforceURL + "store"
 
-	// lastPushed is the canonical form of what the org holds, and pending the snapshot
-	// waiting to be pushed -- nil when there is nothing to deliver -- with pendingCanonical
-	// its canonical form, which becomes lastPushed once it has been delivered.
+	// lastPushed is the canonical form of what the org holds -- nil when that is not
+	// known -- and pending the snapshot waiting to be pushed, nil when there is nothing
+	// to deliver, with pendingCanonical its canonical form, which becomes lastPushed
+	// once it has been delivered.
 	var lastPushed, pending, pendingCanonical []byte
-	delay := bridge.flagPushRetryDelay
+	delay := bridge.dataPushRetryDelay
+	// notBefore is the earliest the next push may start. It is zero before the first
+	// push, so that one is not held.
+	var notBefore time.Time
 
 	// takeSnapshot reads the store and reports whether it holds anything the org does
 	// not. An error here cannot happen -- every item was validated as JSON on its way
 	// in -- and if it somehow does, the store is unusable.
 	takeSnapshot := func() (bool, error) {
-		snapshot, err := bridge.flags.snapshot()
+		snapshot, err := bridge.dataStore.snapshot()
 		if err != nil {
 			return false, err
 		}
@@ -608,7 +645,7 @@ func (bridge *Bridge) flagPushLoop() error {
 			return false, err
 		}
 
-		if bytes.Equal(canonical, lastPushed) {
+		if lastPushed != nil && bytes.Equal(canonical, lastPushed) {
 			log.Print("flag data is unchanged from the last push, not pushing")
 			pending, pendingCanonical = nil, nil
 			return false, nil
@@ -623,7 +660,7 @@ func (bridge *Bridge) flagPushLoop() error {
 			select {
 			case <-bridge.context.Done():
 				return nil
-			case <-bridge.flagsChanged:
+			case <-bridge.dataChanged:
 			}
 
 			changed, err := takeSnapshot()
@@ -632,6 +669,33 @@ func (bridge *Bridge) flagPushLoop() error {
 				return err
 			}
 			if !changed {
+				continue
+			}
+		}
+
+		// Wait out whatever the last push imposed, folding in every change that lands
+		// meanwhile. A change can also undo the need to push -- the data going back to
+		// what the org holds -- in which case the loop goes back to waiting.
+		if wait := time.Until(notBefore); wait > 0 {
+			log.Printf("holding the flag push for %s; changes arriving meanwhile go out with it", wait.Round(time.Millisecond))
+			timer := time.NewTimer(wait)
+		hold:
+			for {
+				select {
+				case <-bridge.context.Done():
+					timer.Stop()
+					return nil
+				case <-bridge.dataChanged:
+					if _, err := takeSnapshot(); err != nil {
+						timer.Stop()
+						bridge.cancel()
+						return err
+					}
+				case <-timer.C:
+					break hold
+				}
+			}
+			if pending == nil {
 				continue
 			}
 		}
@@ -645,32 +709,31 @@ func (bridge *Bridge) flagPushLoop() error {
 			// Said explicitly, because the only other evidence of a push succeeding is
 			// the absence of a failure line after it.
 			log.Printf("pushed %d flags and %d segments to Salesforce",
-				bridge.flags.count("flags"), bridge.flags.count("segments"))
+				bridge.dataStore.count("flags"), bridge.dataStore.count("segments"))
 			lastPushed = pendingCanonical
 			pending, pendingCanonical = nil, nil
-			delay = bridge.flagPushRetryDelay
+			delay = bridge.dataPushRetryDelay
+			notBefore = time.Now().Add(bridge.dataPushMinInterval)
 			continue
 		}
-
-		log.Print("failed pushing flags to salesforce: ", err, "; retrying in ", delay)
-
-		select {
-		case <-bridge.context.Done():
+		if bridge.context.Err() != nil {
+			// The push was cut short by shutdown, which is not a failure to report.
 			return nil
-		case <-bridge.flagsChanged:
-			// Newer data supersedes the snapshot that was waiting. It goes out now
-			// rather than after the delay, because what the org holds is already stale
-			// and the delay was for the benefit of an org that may now be answering.
-			if _, err := takeSnapshot(); err != nil {
-				bridge.cancel()
-				return err
-			}
-		case <-time.After(delay):
 		}
 
+		// The org may hold either set now; refer to the note on lastPushed above.
+		lastPushed = nil
+
+		retryIn := delay
+		if bridge.dataPushMinInterval > retryIn {
+			retryIn = bridge.dataPushMinInterval
+		}
+		log.Print("failed pushing flags to salesforce: ", err, "; retrying in ", retryIn)
+		notBefore = time.Now().Add(retryIn)
+
 		delay *= 2
-		if delay > FLAG_PUSH_MAX_RETRY_DELAY {
-			delay = FLAG_PUSH_MAX_RETRY_DELAY
+		if delay > DATA_PUSH_MAX_RETRY_DELAY {
+			delay = DATA_PUSH_MAX_RETRY_DELAY
 		}
 	}
 }

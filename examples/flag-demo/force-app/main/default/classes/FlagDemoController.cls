@@ -9,6 +9,9 @@
 public with sharing class FlagDemoController {
   public String userKey { get; set; }
   public String flagKey { get; set; }
+  // The scope key the bridge was started with, as LD_SCOPE_KEY. Blank when the bridge
+  // has none. The two must agree, or every evaluation returns its fallback.
+  public String scopeKey { get; set; }
 
   public String flagValue { get; private set; }
   public String reason { get; private set; }
@@ -33,6 +36,7 @@ public with sharing class FlagDemoController {
     flagKey = String.isBlank(ApexPages.currentPage().getParameters().get('flag'))
       ? 'test-flag'
       : ApexPages.currentPage().getParameters().get('flag');
+    scopeKey = ApexPages.currentPage().getParameters().get('scope');
     allFlags = new List<FlagRow>();
     // Not evaluated here. Each evaluation writes an event row, and Visualforce forbids
     // DML in a constructor; the page's load action calls evaluate instead.
@@ -40,7 +44,11 @@ public with sharing class FlagDemoController {
 
   // Bound to the page's load action and its button. Returning null re-renders the page.
   public PageReference evaluate() {
-    LDClient client = new LDClient(new LDConfig.Builder().build());
+    LDConfig.Builder config = new LDConfig.Builder();
+    if (String.isNotBlank(scopeKey)) {
+      config.setScopeKey(scopeKey.trim());
+    }
+    LDClient client = new LDClient(config.build());
     LDUser user = new LDUser.Builder(userKey).build();
 
     // jsonVariation accepts a flag of any type, so the demo does not have to know

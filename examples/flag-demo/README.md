@@ -6,6 +6,11 @@ checking that the bridge is delivering flag data to an org.
 It is a separate Salesforce DX project rather than part of `force-app`, so that deploying
 the SDK never deploys the demo.
 
+**Deploy it to a sandbox or a Developer Edition org only.** The page evaluates flags, and
+so writes evaluation events, every time it loads, and it does so from a plain GET with no
+confirmation token, so anyone who can reach the page can generate events. That is fine
+for checking a bridge and not for a production org.
+
 ## What it shows
 
 - One featured flag, evaluated for a user key you choose, with the SDK's evaluation reason
@@ -24,14 +29,20 @@ sf project deploy start --source-dir ../../force-app --target-org <org>
 sf project deploy start --source-dir force-app --target-org <org>
 ```
 
-Then open `/apex/FlagDemo` on the org's My Domain host. The page accepts two optional
-parameters, `user` and `flag`:
+Then open `/apex/FlagDemo` on the org's My Domain host. The page accepts three optional
+parameters, `user`, `flag` and `scope`:
 
 ```
-https://MyDomainName.my.salesforce.com/apex/FlagDemo?user=demo-user&flag=test-flag
+https://MyDomainName.my.salesforce.com/apex/FlagDemo?user=demo-user&flag=test-flag&scope=gps-production
 ```
 
-With the bridge streaming, a change saved in LaunchDarkly shows on the next reload.
+`scope` must be the bridge's `LD_SCOPE_KEY`, if it has one. The SDK scopes every read to
+it, and a mismatch produces no error: the page simply finds no flag data and shows the
+fallback for everything. Leave it blank for a bridge started without `LD_SCOPE_KEY`.
+
+With the bridge streaming, a change saved in LaunchDarkly shows on the next reload. A
+second change made within the bridge's `STREAM_MIN_PUSH_INTERVAL` of the first, five
+seconds by default, is held until that interval has passed.
 
 ## A note on the controller
 

@@ -11,6 +11,10 @@
           <apex:inputText id="flagKey" value="{!flagKey}" size="40"/>
         </apex:pageBlockSectionItem>
         <apex:pageBlockSectionItem>
+          <apex:outputLabel value="Scope key (the bridge's LD_SCOPE_KEY, if set)" for="scopeKey"/>
+          <apex:inputText id="scopeKey" value="{!scopeKey}" size="40"/>
+        </apex:pageBlockSectionItem>
+        <apex:pageBlockSectionItem>
           <apex:outputLabel value=""/>
           <apex:commandButton action="{!evaluate}" value="Evaluate"/>
         </apex:pageBlockSectionItem>

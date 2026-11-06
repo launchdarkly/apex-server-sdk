@@ -34,9 +34,15 @@ const (
 	OAUTH_URI     = "https://login.salesforce.com/services/oauth2/token"
 	// DEFAULT_STREAM_INITIAL_RECONNECT_DELAY is the first delay before the bridge
 	// reconnects a dropped stream, as accepted by STREAM_INITIAL_RECONNECT_DELAY. Each
-	// consecutive failure doubles it, up to STREAM_MAX_RETRY_DELAY. It matches the other
-	// LaunchDarkly server SDKs.
+	// consecutive failure doubles it, up to STREAM_MAX_RETRY_DELAY.
 	DEFAULT_STREAM_INITIAL_RECONNECT_DELAY = 1 * time.Second
+	// DEFAULT_STREAM_MIN_PUSH_INTERVAL is the least time between two pushes of streamed
+	// flag data to Salesforce, as accepted by STREAM_MIN_PUSH_INTERVAL. It is the
+	// shortest interval that does not earn the warning about org-wide API limits: a
+	// burst of flag changes still costs the org a push every few seconds rather than a
+	// push per change, while a change that follows another closely lands within seconds
+	// rather than up to a poll interval later. Refer to dataPushLoop.
+	DEFAULT_STREAM_MIN_PUSH_INTERVAL = EVENT_POLL_INTERVAL_WARN_THRESHOLD
 	// The OAuth flows the bridge can use to authenticate to Salesforce, as accepted by
 	// OAUTH_GRANT_TYPE.
 	//
@@ -128,7 +134,10 @@ const (
 )
 
 type Bridge struct {
-	client        http.Client
+	// restClient makes every request that has a definite end: polls, event posts,
+	// token requests, and pushes to the org. The stream has its own client, because this
+	// one's Timeout bounds the whole exchange and a stream never ends.
+	restClient    http.Client
 	salesforceURL string
 	// salesforceInstanceURL is the instance_url of the last auth response. It is compared
 	// against SALESFORCE_URL after a refused request and read nowhere else, and it is
@@ -138,31 +147,38 @@ type Bridge struct {
 	launchDarklyBaseURI   string
 	launchDarklyEventsURI string
 	launchDarklyStreamURI string
-	// streaming selects how flags are delivered. True, the default, holds a streaming
-	// connection to LaunchDarkly and pushes each change as it arrives; false polls
-	// launchDarklyBaseURI every flagPollInterval. Refer to stream.go.
+	// streaming selects how flags are delivered. False, the default, polls
+	// launchDarklyBaseURI every flagPollInterval; true holds a streaming connection to
+	// LaunchDarkly and pushes each change as it arrives. Refer to stream.go. Every
+	// field below it down to dataPushMinInterval is set only when streaming.
 	streaming bool
 	// streamInitialReconnectDelay is the first delay before a dropped stream is
-	// reconnected, and streamReadTimeout is how long the stream may stay silent before
-	// it is dropped. The second always holds STREAM_READ_TIMEOUT outside of tests.
+	// reconnected, streamExtendedRetryDelay the first delay after a status a retry is
+	// unlikely to fix, and streamReadTimeout how long the stream may stay silent before
+	// it is dropped. The last two always hold STREAM_EXTENDED_RETRY_DELAY and
+	// STREAM_READ_TIMEOUT outside of tests.
 	streamInitialReconnectDelay time.Duration
+	streamExtendedRetryDelay    time.Duration
 	streamReadTimeout           time.Duration
-	// streamClient is the HTTP client the stream uses. It is separate from client because
-	// client's Timeout would end a stream after HTTP_TIMEOUT; refer to newStreamClient.
+	// streamClient is the HTTP client the stream uses. It is separate from restClient
+	// because restClient's Timeout would end a stream after HTTP_TIMEOUT; refer to
+	// newStreamClient.
 	streamClient *http.Client
-	// flags is the bridge's copy of the environment's flag data while streaming, and
-	// flagsChanged wakes flagPushLoop when it changes. Both are unused when polling.
-	flags        flagStore
-	flagsChanged chan struct{}
-	// flagPushRetryDelay is how long flagPushLoop first waits before retrying a failed
-	// push. It always holds FLAG_PUSH_RETRY_DELAY outside of tests.
-	flagPushRetryDelay time.Duration
-	oauthId            string
-	oauthSecret        string
-	oauthUsername      string
-	oauthPassword      string
-	oauthCurrentToken  string
-	oauthJWTKey        *rsa.PrivateKey
+	// dataStore is the bridge's copy of the environment's flags and segments while
+	// streaming, and dataChanged wakes dataPushLoop when it changes.
+	dataStore   dataStore
+	dataChanged chan struct{}
+	// dataPushRetryDelay is how long dataPushLoop first waits before retrying a failed
+	// push, and dataPushMinInterval the least time between two pushes. The first always
+	// holds DATA_PUSH_RETRY_DELAY outside of tests.
+	dataPushRetryDelay  time.Duration
+	dataPushMinInterval time.Duration
+	oauthId             string
+	oauthSecret         string
+	oauthUsername       string
+	oauthPassword       string
+	oauthCurrentToken   string
+	oauthJWTKey         *rsa.PrivateKey
 	// oauthGrantType is the resolved OAuth flow, always one of the GRANT_ constants.
 	oauthGrantType string
 	oauthURI       url.URL
@@ -498,38 +514,59 @@ func newBridge() (*Bridge, error) {
 		bridge.flagPollInterval = MIN_FLAG_POLL_INTERVAL
 	}
 
-	// Streaming is the default, as it is in every other LaunchDarkly server SDK. The
-	// poll interval is still resolved above so that switching back is one variable, but
-	// an operator who set it expecting an effect is told it has none.
-	bridge.streaming = parseBoolFromEnv("FLAG_STREAMING", true)
+	// Polling is the default, as it always has been. Streaming is opt-in until the next
+	// major version: a long-lived connection is something proxies and firewalls often
+	// have to be told to allow, and a deployment that upgrades must not find its flag
+	// delivery depending on that. An operator who set the poll interval and turned
+	// streaming on is told the interval has no effect.
+	bridge.streaming = parseBoolFromEnv("FLAG_STREAMING", false)
 	if bridge.streaming {
 		if os.Getenv("FLAG_POLL_INTERVAL") != "" {
 			log.Print("FLAG_POLL_INTERVAL has no effect while FLAG_STREAMING is on; " +
 				"set FLAG_STREAMING=false to poll for flags instead")
 		}
-		log.Printf("delivering flags by streaming from %s", bridge.launchDarklyStreamURI)
+
+		bridge.streamInitialReconnectDelay = parseDurationFromEnv("STREAM_INITIAL_RECONNECT_DELAY",
+			DEFAULT_STREAM_INITIAL_RECONNECT_DELAY)
+		if bridge.streamInitialReconnectDelay <= 0 {
+			log.Printf("%s duration (%s) is non-positive, using %s", "STREAM_INITIAL_RECONNECT_DELAY",
+				bridge.streamInitialReconnectDelay, DEFAULT_STREAM_INITIAL_RECONNECT_DELAY)
+			bridge.streamInitialReconnectDelay = DEFAULT_STREAM_INITIAL_RECONNECT_DELAY
+		}
+
+		// Zero is allowed, and means every change is pushed as soon as the one before it
+		// has finished. It is warned about the way a short event interval is, since
+		// under a burst of changes it costs the org a Salesforce API call per change.
+		bridge.dataPushMinInterval = parseDurationFromEnv("STREAM_MIN_PUSH_INTERVAL",
+			DEFAULT_STREAM_MIN_PUSH_INTERVAL)
+		if bridge.dataPushMinInterval < 0 {
+			log.Printf("%s duration (%s) is negative, using %s", "STREAM_MIN_PUSH_INTERVAL",
+				bridge.dataPushMinInterval, DEFAULT_STREAM_MIN_PUSH_INTERVAL)
+			bridge.dataPushMinInterval = DEFAULT_STREAM_MIN_PUSH_INTERVAL
+		}
+		if bridge.dataPushMinInterval < EVENT_POLL_INTERVAL_WARN_THRESHOLD {
+			log.Printf("%s duration (%s) is below %s, a burst of flag changes may trigger organization wide API limits",
+				"STREAM_MIN_PUSH_INTERVAL", bridge.dataPushMinInterval, EVENT_POLL_INTERVAL_WARN_THRESHOLD)
+		}
+
+		bridge.streamExtendedRetryDelay = STREAM_EXTENDED_RETRY_DELAY
+		bridge.streamReadTimeout = STREAM_READ_TIMEOUT
+		bridge.dataPushRetryDelay = DATA_PUSH_RETRY_DELAY
+		bridge.initDataStream(httpTimeoutDuration)
+
+		log.Printf("delivering flags by streaming from %s, pushing to Salesforce at most every %s",
+			bridge.launchDarklyStreamURI, bridge.dataPushMinInterval)
 	} else {
 		log.Printf("delivering flags by polling %s every %s", bridge.launchDarklyBaseURI, bridge.flagPollInterval)
 	}
-
-	bridge.streamInitialReconnectDelay = parseDurationFromEnv("STREAM_INITIAL_RECONNECT_DELAY",
-		DEFAULT_STREAM_INITIAL_RECONNECT_DELAY)
-	if bridge.streamInitialReconnectDelay <= 0 {
-		log.Printf("%s duration (%s) is non-positive, using %s", "STREAM_INITIAL_RECONNECT_DELAY",
-			bridge.streamInitialReconnectDelay, DEFAULT_STREAM_INITIAL_RECONNECT_DELAY)
-		bridge.streamInitialReconnectDelay = DEFAULT_STREAM_INITIAL_RECONNECT_DELAY
-	}
-	bridge.streamReadTimeout = STREAM_READ_TIMEOUT
-	bridge.flagPushRetryDelay = FLAG_PUSH_RETRY_DELAY
 
 	bridge.maxEventsPerDrain = resolveMaxEventsPerDrain()
 
 	bridge.eventPushRetryDelay = EVENT_PUSH_RETRY_DELAY
 
 	bridge.initFlushControls()
-	bridge.initFlagStream(httpTimeoutDuration)
 
-	bridge.client = http.Client{
+	bridge.restClient = http.Client{
 		Timeout: httpTimeoutDuration,
 	}
 
@@ -637,7 +674,7 @@ func (bridge *Bridge) authorizeSalesforce() (error, bool) {
 
 	authRequest.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
-	authResponse, err := bridge.client.Do(authRequest)
+	authResponse, err := bridge.restClient.Do(authRequest)
 	if err != nil {
 		return err, false
 	}
@@ -782,7 +819,7 @@ func (bridge *Bridge) sendWithToken(request *http.Request) (*http.Response, erro
 		request.Body = body
 	}
 
-	return bridge.client.Do(request)
+	return bridge.restClient.Do(request)
 }
 
 // requestWithOauth sends a Salesforce-bound request, and on a rejected token refreshes
@@ -955,7 +992,7 @@ func (bridge *Bridge) flushEvents(pushURI string, pollBytes []byte) {
 
 		log.Print("pushing events to: " + pushURI)
 
-		pushResponse, err := bridge.client.Do(pushRequest)
+		pushResponse, err := bridge.restClient.Do(pushRequest)
 		if err != nil {
 			// A failure below the HTTP layer says nothing about the request, so another
 			// attempt is always worth making. Only the attempt budget decides the
@@ -1165,12 +1202,15 @@ func isHTTPErrorRecoverable(statusCode int) bool {
 
 // pushFlags sends one complete set of flag data to the org's store endpoint, which
 // replaces everything the scope held with it. Both ways of getting flag data deliver
-// through here: pollLoop with the body of a poll, flagPushLoop with a snapshot of the
+// through here: pollLoop with the body of a poll, dataPushLoop with a snapshot of the
 // streamed store.
 //
 // The second value reports a failure no retry of this push can fix: a URI the request
 // cannot be built from, or Salesforce rejecting the credential on a refresh. The caller
 // stops the daemon on it. Every other failure is one the next push may not see.
+//
+// The request carries the bridge context, so a shutdown during a push ends the push
+// rather than waiting out HTTP_TIMEOUT -- or, with HTTP_TIMEOUT at zero, forever.
 //
 // The body is a bytes.Reader rather than a bytes.Buffer, because requestWithOauth can
 // send this request a second time after refreshing the token. Both give http.NewRequest
@@ -1179,7 +1219,7 @@ func isHTTPErrorRecoverable(statusCode int) bool {
 // snapshots once, so a later write to it would leave the two attempts sending different
 // bytes.
 func (bridge *Bridge) pushFlags(pushURI string, payload []byte) (error, bool) {
-	pushRequest, err := http.NewRequest("POST", pushURI, bytes.NewReader(payload))
+	pushRequest, err := http.NewRequestWithContext(bridge.context, "POST", pushURI, bytes.NewReader(payload))
 	if err != nil {
 		// Logged as well as returned, which is not redundant. run() reads one error from
 		// each loop and returns only the first to arrive, so an error from here reaches
@@ -1242,7 +1282,7 @@ func (bridge *Bridge) pollLoop() error {
 
 		log.Print("requesting flags from: " + pollURI)
 
-		pollResponse, err := bridge.client.Do(pollRequest)
+		pollResponse, err := bridge.restClient.Do(pollRequest)
 
 		if err != nil {
 			log.Print("poll flags failed: ", err)

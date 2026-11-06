@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -42,7 +43,10 @@ type streamServer struct {
 	mu          sync.Mutex
 	connections int
 	headers     []http.Header
-	current     *streamConnection
+	// arrivals is when each connection was accepted, by zero-based number, for tests
+	// of how long the bridge waited before reconnecting.
+	arrivals []time.Time
+	current  *streamConnection
 	// opened receives once per stream that has been accepted, so a test can wait for a
 	// specific connection rather than sleep and hope.
 	opened chan struct{}
@@ -75,6 +79,7 @@ func (s *streamServer) handle(w http.ResponseWriter, r *http.Request) {
 	s.connections++
 	connection := s.connections
 	s.headers = append(s.headers, r.Header.Clone())
+	s.arrivals = append(s.arrivals, time.Now())
 	status := s.statusFor(connection)
 	s.mu.Unlock()
 
@@ -178,6 +183,27 @@ func (s *streamServer) connectionCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.connections
+}
+
+// awaitConnectionCount waits until the server has seen at least n connections, whatever
+// status it answered them with. awaitConnection only reports the ones it accepted.
+func (s *streamServer) awaitConnectionCount(n int) {
+	s.t.Helper()
+
+	deadline := time.Now().Add(streamWait)
+	for s.connectionCount() < n {
+		if time.Now().After(deadline) {
+			s.t.Fatalf("the bridge opened %d stream connections, want at least %d", s.connectionCount(), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// arrivalOf returns when one connection was accepted, by one-based number.
+func (s *streamServer) arrivalOf(connection int) time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.arrivals[connection-1]
 }
 
 // headersOf returns the request headers of one connection, by one-based number.
@@ -721,8 +747,11 @@ func TestStreamPushRetriesUntilSalesforceAccepts(t *testing.T) {
 }
 
 // TestStreamPushRetryCarriesNewerData covers the coalescing on the retry path. A change
-// that lands while a failed push waits to be retried goes out at once, and it goes out
-// with the change folded in rather than being queued behind the stale snapshot.
+// that lands while a failed push waits to be retried goes out in the retry, folded in
+// rather than queued behind the stale snapshot -- but not before the retry was due. The
+// delay is there to spare an org that is refusing pushes, and an org that has hit its
+// API limit answers every push with a 403, so letting a change cut the delay short would
+// push at the rate flags change rather than at the backoff rate.
 func TestStreamPushRetryCarriesNewerData(t *testing.T) {
 	captureLog(t)
 	ld := newStreamServer(t, nil)
@@ -733,21 +762,27 @@ func TestStreamPushRetryCarriesNewerData(t *testing.T) {
 		return http.StatusOK
 	})
 	bridge := newStreamingBridge(t, ld, sf)
-	// Long enough that a retry on the timer alone would fail the test's wait, so the
-	// retry that arrives can only have been woken by the change.
-	bridge.flagPushRetryDelay = time.Hour
+	// Long enough to measure, short enough that a change can be sent during it.
+	const retryDelay = 500 * time.Millisecond
+	bridge.dataPushRetryDelay = retryDelay
 
 	stop, _ := startFeatureLoop(t, bridge)
 
 	ld.awaitConnection()
 	ld.send(PUT_EVENT, `{"path":"/","data":`+streamFlagData+`}`)
 	assertSameJSON(t, sf.awaitPush().body, streamFlagData)
+	refused := time.Now()
 
 	ld.send(PATCH_EVENT, `{"path":"/flags/gamma","data":{"key":"gamma","version":1}}`)
 
 	retry := sf.awaitPush()
 	assertSameJSON(t, retry.body,
 		`{"flags":{"alpha":{"key":"alpha","version":3},"beta":{"key":"beta","version":7},"gamma":{"key":"gamma","version":1}},"segments":{}}`)
+	// The timer started when the refusal came back, which is a little after the fake
+	// store saw the push, so the wait is measured generously.
+	if waited := time.Since(refused); waited < retryDelay/2 {
+		t.Errorf("the retry arrived %s after the refusal; the change must not cut the %s delay short", waited, retryDelay)
+	}
 
 	if err := stop(); err != nil {
 		t.Fatalf("featureLoop returned unexpected error: %v", err)
@@ -757,80 +792,254 @@ func TestStreamPushRetryCarriesNewerData(t *testing.T) {
 	}
 }
 
-// TestStreamGivesUpOnAnUnrecoverableStatus covers the statuses a retry cannot change.
-// The daemon stops with an error that names the cause, and it does not spend a
-// reconnect finding out the answer is the same.
-func TestStreamGivesUpOnAnUnrecoverableStatus(t *testing.T) {
+// TestStreamFailedPushForgetsWhatTheOrgHolds covers the dedupe after a failure. A push
+// that failed on this side may have been committed on the org's side -- a timeout or a
+// 5xx says nothing either way -- so if the data then goes back to what was last pushed
+// successfully, it has to be pushed again rather than skipped as unchanged.
+func TestStreamFailedPushForgetsWhatTheOrgHolds(t *testing.T) {
+	captureLog(t)
+	ld := newStreamServer(t, nil)
+	sf := newStoreServer(t, func(push int) int {
+		if push == 2 {
+			return http.StatusInternalServerError
+		}
+		return http.StatusOK
+	})
+	bridge := newStreamingBridge(t, ld, sf)
+	// Long enough that the revert below lands while the failed push is waiting to be
+	// retried, so the retry is what carries it.
+	bridge.dataPushRetryDelay = 500 * time.Millisecond
+
+	stop, _ := startFeatureLoop(t, bridge)
+
+	ld.awaitConnection()
+	ld.send(PUT_EVENT, `{"path":"/","data":`+streamFlagData+`}`)
+	assertSameJSON(t, sf.awaitPush().body, streamFlagData)
+
+	// A change the org refuses, and then, by way of a reconnect, the data as it was
+	// before the change.
+	ld.send(PATCH_EVENT, `{"path":"/flags/gamma","data":{"key":"gamma","version":1}}`)
+	refused := sf.awaitPush()
+	if !strings.Contains(string(refused.body), `"gamma"`) {
+		t.Fatalf("the second push does not carry the change: %s", refused.body)
+	}
+	ld.drop()
+	ld.awaitConnection()
+	ld.send(PUT_EVENT, `{"path":"/","data":`+streamFlagData+`}`)
+
+	// Without the fix there is no third push: the reverted data matches the last
+	// successful push and is skipped, and the org stays on whatever the refused push
+	// left it with.
+	assertSameJSON(t, sf.awaitPush().body, streamFlagData)
+
+	if err := stop(); err != nil {
+		t.Fatalf("featureLoop returned unexpected error: %v", err)
+	}
+	if pushes := sf.pushCount(); pushes != 3 {
+		t.Errorf("Salesforce served %d pushes, want 3", pushes)
+	}
+}
+
+// TestStreamPushesAreRateLimited covers the floor between pushes. LaunchDarkly sends one
+// patch per changed item, so a bulk edit arrives as a burst, and every push is a
+// Salesforce API call against the org's daily allocation. Changes that land within the
+// interval after a push are held and go out together once it has passed.
+func TestStreamPushesAreRateLimited(t *testing.T) {
+	logged := captureLog(t)
+	ld := newStreamServer(t, nil)
+	sf := newStoreServer(t, nil)
+	bridge := newStreamingBridge(t, ld, sf)
+	const interval = 500 * time.Millisecond
+	bridge.dataPushMinInterval = interval
+
+	stop, _ := startFeatureLoop(t, bridge)
+
+	// The first push is not held: nothing came before it.
+	ld.awaitConnection()
+	ld.send(PUT_EVENT, `{"path":"/","data":`+streamFlagData+`}`)
+	assertSameJSON(t, sf.awaitPush().body, streamFlagData)
+	first := time.Now()
+
+	// A burst. Three changes, one push.
+	ld.send(PATCH_EVENT, `{"path":"/flags/gamma","data":{"key":"gamma","version":1}}`)
+	ld.send(PATCH_EVENT, `{"path":"/flags/delta","data":{"key":"delta","version":1}}`)
+	ld.send(PATCH_EVENT, `{"path":"/flags/alpha","data":{"key":"alpha","version":4}}`)
+
+	second := sf.awaitPush()
+	assertSameJSON(t, second.body,
+		`{"flags":{"alpha":{"key":"alpha","version":4},"beta":{"key":"beta","version":7},"gamma":{"key":"gamma","version":1},"delta":{"key":"delta","version":1}},"segments":{}}`)
+	// The interval is measured from when the first push finished, which is a little
+	// after the fake store saw it, so the wait is measured generously.
+	if waited := time.Since(first); waited < interval/2 {
+		t.Errorf("the second push arrived %s after the first, want at least %s", waited, interval)
+	}
+
+	if err := stop(); err != nil {
+		t.Fatalf("featureLoop returned unexpected error: %v", err)
+	}
+	if pushes := sf.pushCount(); pushes != 2 {
+		t.Errorf("Salesforce served %d pushes, want 2: the put and one carrying the whole burst", pushes)
+	}
+	if !strings.Contains(logged.String(), "holding the flag push for") {
+		t.Errorf("the hold was not logged\nlog:\n%s", logged.String())
+	}
+}
+
+// TestStreamSlowsDownOnAnUnrecoverableStatus covers the statuses a retry is unlikely to
+// change. The daemon does not stop -- a stop would need an operator to notice, and would
+// take event delivery down with flag delivery -- but it does not keep asking every second
+// either: the reconnects move onto the extended schedule, and the stream resumes when the
+// service answers 200 again.
+func TestStreamSlowsDownOnAnUnrecoverableStatus(t *testing.T) {
+	// Long enough to tell from the millisecond reconnect delay the test bridge uses,
+	// short enough that two of them fit in a test. With jitter, each wait is at least
+	// half of this.
+	const extended = 200 * time.Millisecond
+
 	tests := []struct {
 		name string
-		// statusFor answers each connection; the unrecoverable status is reached on the
+		// statusFor answers each connection. The unrecoverable status is reached on the
 		// first connection or after one good one, since the two go through different
-		// paths in the stream library.
-		statusFor       func(connection int) int
-		wantErr         string
-		wantConnections int
+		// paths in the stream library, and is answered twice so the second wait shows
+		// the backoff holding.
+		statusFor func(connection int) int
+		// refused is the first connection answered with the unrecoverable status.
+		refused int
+		wantLog string
 	}{
 		{
-			name:            "401 on the first connection",
-			statusFor:       func(int) int { return http.StatusUnauthorized },
-			wantErr:         "requesting flags unauthorized",
-			wantConnections: 1,
+			name: "401 on the first connection",
+			statusFor: func(connection int) int {
+				if connection <= 2 {
+					return http.StatusUnauthorized
+				}
+				return http.StatusOK
+			},
+			refused: 1,
+			wantLog: "refused the SDK key with HTTP 401; check LD_SDK_KEY",
 		},
 		{
-			name:            "403 on the first connection",
-			statusFor:       func(int) int { return http.StatusForbidden },
-			wantErr:         "requesting flags unauthorized",
-			wantConnections: 1,
+			name: "403 on the first connection",
+			statusFor: func(connection int) int {
+				if connection <= 2 {
+					return http.StatusForbidden
+				}
+				return http.StatusOK
+			},
+			refused: 1,
+			wantLog: "refused the SDK key with HTTP 403; check LD_SDK_KEY",
 		},
 		{
-			name:            "404 on the first connection",
-			statusFor:       func(int) int { return http.StatusNotFound },
-			wantErr:         "the LaunchDarkly stream answered HTTP 404",
-			wantConnections: 1,
+			name: "404 on the first connection",
+			statusFor: func(connection int) int {
+				if connection <= 2 {
+					return http.StatusNotFound
+				}
+				return http.StatusOK
+			},
+			refused: 1,
+			wantLog: "answered HTTP 404, which a retry is unlikely to fix; check LD_STREAM_URI",
 		},
 		{
 			name: "401 after a reconnect",
 			statusFor: func(connection int) int {
-				if connection == 1 {
+				switch connection {
+				case 1:
+					return http.StatusOK
+				case 2, 3:
+					return http.StatusUnauthorized
+				default:
 					return http.StatusOK
 				}
-				return http.StatusUnauthorized
 			},
-			wantErr:         "requesting flags unauthorized",
-			wantConnections: 2,
+			refused: 2,
+			wantLog: "refused the SDK key with HTTP 401; check LD_SDK_KEY",
 		},
 	}
 
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			captureLog(t)
+			logged := captureLog(t)
 			ld := newStreamServer(t, test.statusFor)
 			sf := newStoreServer(t, nil)
 			bridge := newStreamingBridge(t, ld, sf)
+			bridge.streamExtendedRetryDelay = extended
 
-			_, done := startFeatureLoop(t, bridge)
+			stop, done := startFeatureLoop(t, bridge)
 
-			if test.wantConnections > 1 {
+			if test.refused > 1 {
 				ld.awaitConnection()
 				ld.drop()
 			}
 
-			err := awaitReturn(t, done)
-			if err == nil {
-				t.Fatal("featureLoop returned nil for a status no retry can fix")
+			// Two refusals, then the connection that is accepted.
+			ld.awaitConnectionCount(test.refused + 2)
+			ld.awaitConnection()
+
+			if waited := ld.arrivalOf(test.refused + 1).Sub(ld.arrivalOf(test.refused)); waited < extended/2 {
+				t.Errorf("the first retry came %s after the refusal, want at least %s: the extended delay was not used", waited, extended/2)
 			}
-			if err.Error() != test.wantErr {
-				t.Errorf("featureLoop returned %q, want %q", err, test.wantErr)
+			if waited := ld.arrivalOf(test.refused + 2).Sub(ld.arrivalOf(test.refused + 1)); waited < extended {
+				t.Errorf("the second retry came %s after the first, want at least %s: the extended delay did not back off", waited, extended)
 			}
-			if connections := ld.connectionCount(); connections != test.wantConnections {
-				t.Errorf("the bridge opened %d stream connections, want %d; an unrecoverable "+
-					"status must not be retried", connections, test.wantConnections)
+
+			// The daemon is still running, and the stream that was finally accepted is
+			// used.
+			select {
+			case err := <-done:
+				t.Fatalf("featureLoop returned (%v) on a status that must not stop the daemon", err)
+			default:
 			}
-			if bridge.context.Err() == nil {
-				t.Error("featureLoop returned without cancelling the bridge; eventLoop would keep running")
+			if bridge.context.Err() != nil {
+				t.Error("the bridge was cancelled; eventLoop would have stopped too")
+			}
+			ld.send(PUT_EVENT, `{"path":"/","data":`+streamFlagData+`}`)
+			assertSameJSON(t, sf.awaitPush().body, streamFlagData)
+
+			if err := stop(); err != nil {
+				t.Fatalf("featureLoop returned unexpected error: %v", err)
+			}
+			if !strings.Contains(logged.String(), test.wantLog) {
+				t.Errorf("the log does not contain %q\nlog:\n%s", test.wantLog, logged.String())
 			}
 		})
+	}
+}
+
+// TestStreamRecoverableStatusRestoresTheNormalDelay is the other side of the extended
+// schedule. A service that answered 404 and now answers 503 is answering differently,
+// so the next reconnect is on the normal schedule rather than minutes away.
+func TestStreamRecoverableStatusRestoresTheNormalDelay(t *testing.T) {
+	const extended = time.Second
+
+	captureLog(t)
+	ld := newStreamServer(t, func(connection int) int {
+		switch connection {
+		case 1:
+			return http.StatusNotFound
+		case 2:
+			return http.StatusServiceUnavailable
+		default:
+			return http.StatusOK
+		}
+	})
+	sf := newStoreServer(t, nil)
+	bridge := newStreamingBridge(t, ld, sf)
+	bridge.streamExtendedRetryDelay = extended
+
+	stop, _ := startFeatureLoop(t, bridge)
+
+	ld.awaitConnection()
+	if waited := ld.arrivalOf(2).Sub(ld.arrivalOf(1)); waited < extended/2 {
+		t.Errorf("the retry after the 404 came %s later, want at least %s", waited, extended/2)
+	}
+	if waited := ld.arrivalOf(3).Sub(ld.arrivalOf(2)); waited >= extended/2 {
+		t.Errorf("the retry after the 503 came %s later; the extended delay was still in force", waited)
+	}
+
+	if err := stop(); err != nil {
+		t.Fatalf("featureLoop returned unexpected error: %v", err)
 	}
 }
 
@@ -953,14 +1162,18 @@ func TestStreamStopsOnAPermanentSalesforceFailure(t *testing.T) {
 	}))
 	defer tokens.Close()
 
+	// newBridge resolved a polling bridge, so the stream state is prepared here.
 	bridge := bridgeForGrant(t, GRANT_CLIENT_CREDENTIALS, tokens.URL)
 	t.Cleanup(bridge.cancel)
 	bridge.streaming = true
 	bridge.launchDarklyStreamURI = ld.server.URL
 	bridge.salesforceURL = sf.server.URL + "/"
 	bridge.oauthCurrentToken = staleToken
+	bridge.initDataStream(0)
 	bridge.streamInitialReconnectDelay = time.Millisecond
-	bridge.flagPushRetryDelay = time.Millisecond
+	bridge.streamExtendedRetryDelay = time.Millisecond
+	bridge.streamReadTimeout = STREAM_READ_TIMEOUT
+	bridge.dataPushRetryDelay = time.Millisecond
 
 	_, done := startFeatureLoop(t, bridge)
 
@@ -1002,9 +1215,9 @@ func TestStreamReturnsAPushRequestError(t *testing.T) {
 	}
 }
 
-// TestNewBridgeResolvesStreaming covers FLAG_STREAMING through newBridge. Streaming is
-// the default, and a value that is not a boolean keeps the default rather than failing
-// startup, matching how the duration variables behave.
+// TestNewBridgeResolvesStreaming covers FLAG_STREAMING through newBridge. Polling is
+// the default, as it was before streaming existed; a value that is not a boolean keeps
+// the default rather than failing startup, matching how the duration variables behave.
 func TestNewBridgeResolvesStreaming(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1013,14 +1226,14 @@ func TestNewBridgeResolvesStreaming(t *testing.T) {
 		want    bool
 		wantLog string
 	}{
-		{name: "unset streams", set: false, want: true, wantLog: "delivering flags by streaming from " + LD_STREAM_URI},
-		{name: "empty streams", value: "", set: true, want: true},
-		{name: "true streams", value: "true", set: true, want: true},
-		{name: "false polls", value: "false", set: true, want: false, wantLog: "delivering flags by polling " + LD_BASE_URI + " every 30s"},
-		{name: "0 polls", value: "0", set: true, want: false},
-		{name: "FALSE polls", value: "FALSE", set: true, want: false},
-		{name: "surrounding whitespace is trimmed", value: " false ", set: true, want: false},
-		{name: "a non-boolean keeps the default", value: "yes", set: true, want: true, wantLog: "FLAG_STREAMING (yes) is not a boolean, using true"},
+		{name: "unset polls", set: false, want: false, wantLog: "delivering flags by polling " + LD_BASE_URI + " every 30s"},
+		{name: "empty polls", value: "", set: true, want: false},
+		{name: "false polls", value: "false", set: true, want: false},
+		{name: "true streams", value: "true", set: true, want: true, wantLog: "delivering flags by streaming from " + LD_STREAM_URI + ", pushing to Salesforce at most every 5s"},
+		{name: "1 streams", value: "1", set: true, want: true},
+		{name: "TRUE streams", value: "TRUE", set: true, want: true},
+		{name: "surrounding whitespace is trimmed", value: " true ", set: true, want: true},
+		{name: "a non-boolean keeps the default", value: "yes", set: true, want: false, wantLog: "FLAG_STREAMING (yes) is not a boolean, using false"},
 	}
 
 	for _, test := range tests {
@@ -1092,6 +1305,7 @@ func TestNewBridgeResolvesStreamReconnectDelay(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			setMinimalBridgeEnv(t)
+			setEnv(t, "FLAG_STREAMING", "true")
 			if test.set {
 				setEnv(t, "STREAM_INITIAL_RECONNECT_DELAY", test.value)
 			} else {
@@ -1109,8 +1323,57 @@ func TestNewBridgeResolvesStreamReconnectDelay(t *testing.T) {
 	}
 }
 
+// TestNewBridgeResolvesMinPushInterval covers STREAM_MIN_PUSH_INTERVAL. The default is
+// the shortest value that does not warn. Anything shorter, down to zero, which removes
+// the floor, is honored with the same warning a short event interval earns, since it
+// lets a burst of changes cost the org more calls; only a negative or unparseable value
+// falls back to the default.
+func TestNewBridgeResolvesMinPushInterval(t *testing.T) {
+	const warning = "is below 5s, a burst of flag changes may trigger organization wide API limits"
+
+	tests := []struct {
+		name        string
+		value       string
+		set         bool
+		want        time.Duration
+		wantWarning bool
+	}{
+		{name: "unset falls back to the default", set: false, want: DEFAULT_STREAM_MIN_PUSH_INTERVAL},
+		{name: "a longer value is honored", value: "30s", set: true, want: 30 * time.Second},
+		{name: "a shorter value is honored, with a warning", value: "2s", set: true, want: 2 * time.Second, wantWarning: true},
+		{name: "zero removes the floor, with a warning", value: "0s", set: true, want: 0, wantWarning: true},
+		{name: "negative falls back to the default", value: "-1s", set: true, want: DEFAULT_STREAM_MIN_PUSH_INTERVAL},
+		{name: "unparseable falls back to the default", value: "30", set: true, want: DEFAULT_STREAM_MIN_PUSH_INTERVAL},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			setMinimalBridgeEnv(t)
+			setEnv(t, "FLAG_STREAMING", "true")
+			if test.set {
+				setEnv(t, "STREAM_MIN_PUSH_INTERVAL", test.value)
+			} else {
+				unsetEnv(t, "STREAM_MIN_PUSH_INTERVAL")
+			}
+			logged := captureLog(t)
+
+			bridge, err := newBridge()
+			if err != nil {
+				t.Fatalf("newBridge returned unexpected error: %v", err)
+			}
+			if bridge.dataPushMinInterval != test.want {
+				t.Errorf("dataPushMinInterval = %s, want %s", bridge.dataPushMinInterval, test.want)
+			}
+			if got := strings.Contains(logged.String(), warning); got != test.wantWarning {
+				t.Errorf("warning present = %v, want %v\nlog:\n%s", got, test.wantWarning, logged.String())
+			}
+		})
+	}
+}
+
 // TestStreamingReportsAnIgnoredPollInterval covers the notice for an operator who set
-// FLAG_POLL_INTERVAL expecting it to mean something under the streaming default.
+// FLAG_POLL_INTERVAL expecting it to mean something with streaming on.
 func TestStreamingReportsAnIgnoredPollInterval(t *testing.T) {
 	const notice = "FLAG_POLL_INTERVAL has no effect while FLAG_STREAMING is on"
 
@@ -1150,24 +1413,30 @@ func TestStreamingReportsAnIgnoredPollInterval(t *testing.T) {
 
 // TestStreamClientBoundsOnlyTheConnection covers why the stream has its own HTTP client.
 // http.Client.Timeout bounds the whole response, and a stream's response never ends, so
-// HTTP_TIMEOUT has to land on the wait for headers instead.
+// HTTP_TIMEOUT has to land on getting connected instead: the dial, the TLS handshake,
+// and the wait for headers, each of which can hang on its own.
 func TestStreamClientBoundsOnlyTheConnection(t *testing.T) {
+	defaultTransport := http.DefaultTransport.(*http.Transport)
+
 	tests := []struct {
 		name        string
 		httpTimeout string
 		set         bool
 		wantHeader  time.Duration
+		wantTLS     time.Duration
 	}{
-		{name: "the default", set: false, wantHeader: HTTP_TIMEOUT},
-		{name: "a configured timeout", httpTimeout: "1500ms", set: true, wantHeader: 1500 * time.Millisecond},
-		// Zero means no timeout for the main client, and the same here.
-		{name: "zero disables it", httpTimeout: "0s", set: true, wantHeader: 0},
+		{name: "the default", set: false, wantHeader: HTTP_TIMEOUT, wantTLS: HTTP_TIMEOUT},
+		{name: "a configured timeout", httpTimeout: "1500ms", set: true, wantHeader: 1500 * time.Millisecond, wantTLS: 1500 * time.Millisecond},
+		// Zero means no timeout for the main client. The stream keeps the default
+		// transport's connect timeouts rather than none at all.
+		{name: "zero keeps the transport defaults", httpTimeout: "0s", set: true, wantHeader: 0, wantTLS: defaultTransport.TLSHandshakeTimeout},
 	}
 
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			setMinimalBridgeEnv(t)
+			setEnv(t, "FLAG_STREAMING", "true")
 			if test.set {
 				setEnv(t, "HTTP_TIMEOUT", test.httpTimeout)
 			}
@@ -1188,11 +1457,50 @@ func TestStreamClientBoundsOnlyTheConnection(t *testing.T) {
 			if transport.ResponseHeaderTimeout != test.wantHeader {
 				t.Errorf("ResponseHeaderTimeout = %s, want %s", transport.ResponseHeaderTimeout, test.wantHeader)
 			}
+			if transport.TLSHandshakeTimeout != test.wantTLS {
+				t.Errorf("TLSHandshakeTimeout = %s, want %s", transport.TLSHandshakeTimeout, test.wantTLS)
+			}
+			if transport.DialContext == nil {
+				t.Error("the stream transport has no dialer")
+			}
 			if transport.Proxy == nil {
 				t.Error("the stream transport lost the default proxy configuration")
 			}
 		})
 	}
+
+	// The value checks above cannot see the dial timeout, so the connect phase is
+	// exercised for real: a listener that accepts the connection and then says nothing
+	// leaves a TLS handshake hanging, which the default transport would wait ten
+	// seconds on.
+	t.Run("a hung connect fails within the timeout", func(t *testing.T) {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		go func() {
+			for {
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+			}
+		}()
+
+		const timeout = 200 * time.Millisecond
+		client := newStreamClient(timeout)
+		started := time.Now()
+		response, err := client.Get("https://" + listener.Addr().String() + "/all")
+		if err == nil {
+			response.Body.Close()
+			t.Fatal("the request to a server that never completes the handshake succeeded")
+		}
+		if took := time.Since(started); took > 5*timeout {
+			t.Errorf("the connect took %s to fail, want about %s", took, timeout)
+		}
+	})
 }
 
 // TestCanonicalJSONComparesContent pins what the dedupe in flagPushLoop depends on. Two
@@ -1200,7 +1508,7 @@ func TestStreamClientBoundsOnlyTheConnection(t *testing.T) {
 // on the wire and however they were spaced, and the snapshot itself must still carry each
 // item as it arrived. A real difference in content must still show.
 func TestCanonicalJSONComparesContent(t *testing.T) {
-	var first, second flagStore
+	var first, second dataStore
 
 	if err := first.replace(map[string]map[string]json.RawMessage{
 		"flags":    {"alpha": json.RawMessage(`{"key":"alpha","version":1,"rules":[{"id":"r1","clauses":[]}]}`), "beta": json.RawMessage(`{"key":"beta","version":1,"x":1.50}`)},
@@ -1214,7 +1522,7 @@ func TestCanonicalJSONComparesContent(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	second.upsert("flags", "alpha", flagItem{version: 1, raw: json.RawMessage(`{"rules":[{"clauses":[],"id":"r1"}],"version":1,"key":"alpha"}`)})
+	second.upsert("flags", "alpha", versionedItem{version: 1, raw: json.RawMessage(`{"rules":[{"clauses":[],"id":"r1"}],"version":1,"key":"alpha"}`)})
 
 	a, err := first.snapshot()
 	if err != nil {
@@ -1244,7 +1552,7 @@ func TestCanonicalJSONComparesContent(t *testing.T) {
 	}
 
 	// A real change must still register.
-	second.upsert("flags", "beta", flagItem{version: 2, raw: json.RawMessage(`{"key":"beta","version":2,"x":1.50}`)})
+	second.upsert("flags", "beta", versionedItem{version: 2, raw: json.RawMessage(`{"key":"beta","version":2,"x":1.50}`)})
 	c, err := second.snapshot()
 	if err != nil {
 		t.Fatal(err)
