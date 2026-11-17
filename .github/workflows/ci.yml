@@ -19,13 +19,13 @@ jobs:
       id-token: write # Needed if using OIDC to get release secrets.
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
       - name: Install Salesforce CLI (sf)
         run: npm install @salesforce/cli --global
 
-      - uses: launchdarkly/gh-actions/actions/release-secrets@release-secrets-v1.2.0
+      - uses: launchdarkly/gh-actions/actions/release-secrets@release-secrets-v1.2.1
         name: 'Get secrets from AWS SSM'
         with:
           aws_assume_role: ${{ vars.AWS_ROLE_ARN }}
@@ -72,9 +72,9 @@ jobs:
         go-version: ${{ fromJSON(needs.go-versions.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Go ${{ matrix.go-version }}
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version }}
 
