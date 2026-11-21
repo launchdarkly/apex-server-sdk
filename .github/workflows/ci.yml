@@ -25,7 +25,7 @@ jobs:
       - name: Install Salesforce CLI (sf)
         run: npm install @salesforce/cli --global
 
-      - uses: launchdarkly/gh-actions/actions/release-secrets@release-secrets-v1.2.1
+      - uses: launchdarkly/gh-actions/actions/release-secrets@release-secrets-v1.2.2
         name: 'Get secrets from AWS SSM'
         with:
           aws_assume_role: ${{ vars.AWS_ROLE_ARN }}
