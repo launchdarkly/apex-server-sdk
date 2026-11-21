@@ -1,0 +1,52 @@
+<apex:page controller="FlagDemoController" action="{!evaluate}" title="LaunchDarkly Flag Demo" showHeader="true" sidebar="false">
+  <apex:form>
+    <apex:pageBlock title="LaunchDarkly flag evaluation">
+      <apex:pageBlockSection title="Evaluate a flag" columns="1">
+        <apex:pageBlockSectionItem>
+          <apex:outputLabel value="User key" for="userKey"/>
+          <apex:inputText id="userKey" value="{!userKey}" size="40"/>
+        </apex:pageBlockSectionItem>
+        <apex:pageBlockSectionItem>
+          <apex:outputLabel value="Flag key" for="flagKey"/>
+          <apex:inputText id="flagKey" value="{!flagKey}" size="40"/>
+        </apex:pageBlockSectionItem>
+        <apex:pageBlockSectionItem>
+          <apex:outputLabel value="Scope key (the bridge's LD_SCOPE_KEY, if set)" for="scopeKey"/>
+          <apex:inputText id="scopeKey" value="{!scopeKey}" size="40"/>
+        </apex:pageBlockSectionItem>
+        <apex:pageBlockSectionItem>
+          <apex:outputLabel value=""/>
+          <apex:commandButton action="{!evaluate}" value="Evaluate"/>
+        </apex:pageBlockSectionItem>
+      </apex:pageBlockSection>
+
+      <apex:pageBlockSection title="Result for '{!flagKey}'" columns="1">
+        <apex:pageBlockSectionItem>
+          <apex:outputLabel value="Value"/>
+          <apex:outputText value="{!flagValue}" style="font-family: monospace; font-size: 1.4em; font-weight: bold;"/>
+        </apex:pageBlockSectionItem>
+        <apex:pageBlockSectionItem>
+          <apex:outputLabel value="Reason"/>
+          <apex:outputText value="{!reason}"/>
+        </apex:pageBlockSectionItem>
+        <apex:pageBlockSectionItem>
+          <apex:outputLabel value="Variation index"/>
+          <apex:outputText value="{!variationIndex}"/>
+        </apex:pageBlockSectionItem>
+        <apex:pageBlockSectionItem>
+          <apex:outputLabel value="Evaluated at"/>
+          <apex:outputText value="{!evaluatedAt}"/>
+        </apex:pageBlockSectionItem>
+      </apex:pageBlockSection>
+
+      <apex:pageBlockSection title="All flags for this user" columns="1">
+        <apex:pageBlockTable value="{!allFlags}" var="row">
+          <apex:column headerValue="Flag key" value="{!row.key}"/>
+          <apex:column headerValue="Value">
+            <apex:outputText value="{!row.value}" style="font-family: monospace;"/>
+          </apex:column>
+        </apex:pageBlockTable>
+      </apex:pageBlockSection>
+    </apex:pageBlock>
+  </apex:form>
+</apex:page>

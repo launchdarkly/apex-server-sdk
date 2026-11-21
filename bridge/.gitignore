@@ -1,1 +1,3 @@
 bridge
+.env.local
+bridge.log
