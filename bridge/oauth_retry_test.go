@@ -324,16 +324,26 @@ func TestFeatureLoopRetriesTheFlagPushWithTheCompleteBody(t *testing.T) {
 	bridge.oauthCurrentToken = staleToken
 	bridge.salesforceURL = sf.URL + "/"
 
-	// Cancelling from inside the poll bounds the run to a single cycle: featureLoop only
-	// examines the context once the cycle is over. Both recorded pushes are therefore
-	// attempts at the same request, which is what makes comparing their bodies meaningful.
+	// The first poll serves the data, and the second cancels the bridge and reports
+	// nothing changed, so only the first cycle pushes. The push request carries the
+	// bridge context, which is why the cancel cannot come from inside the first poll:
+	// it would end the push before it was sent. Both recorded pushes are therefore
+	// attempts at the same request, which is what makes comparing their bodies
+	// meaningful.
+	var polls int
 	ld := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bridge.cancel()
+		polls++
+		if polls > 1 {
+			bridge.cancel()
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(flagPayload))
 	}))
 	defer ld.Close()
 	bridge.launchDarklyBaseURI = ld.URL
+	bridge.flagPollInterval = time.Millisecond
 
 	if err := bridge.featureLoop(); err != nil {
 		t.Fatalf("featureLoop returned unexpected error: %v", err)
